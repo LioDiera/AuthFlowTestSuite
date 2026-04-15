@@ -1,0 +1,7 @@
+# Build outputs
+bin/
+obj/
+
+# VS / Rider
+.vs/
+*.user
