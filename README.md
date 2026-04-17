@@ -4,9 +4,13 @@ A .NET 8 console app that tests the [OAuth 2.0 device code flow](https://learn.m
 
 ## Prerequisites
 
-- [.NET 8 SDK](https://dotnet.microsoft.com/download)
+- [.NET 10 SDK](https://dotnet.microsoft.com/download)
 - [VS Code](https://code.visualstudio.com/) with the [C# Dev Kit](https://marketplace.visualstudio.com/items?itemName=ms-dotnettools.csdevkit) extension
 - A Microsoft Entra ID (Azure AD) tenant
+- nuget.org configured as a package source. If you haven't done this before, run:
+  ```
+  dotnet nuget add source https://api.nuget.org/v3/index.json --name nuget.org
+  ```
 
 ## 1. Configure the App Registration
 
@@ -24,15 +28,14 @@ In the [Azure portal](https://portal.azure.com):
 
 ## 2. Configure appsettings.json
 
-Open `appsettings.json` and replace the placeholder values with your app registration details:
+Open `appsettings.json` and fill in the values for the provider(s) you want to use. Leave the other section as-is with placeholders — the app will ignore any unconfigured provider.
 
+**Entra ID**
 ```json
-{
-  "AzureAd": {
-    "TenantId": "YOUR_TENANT_ID",
-    "ClientId": "YOUR_CLIENT_ID",
-    "Scopes": [ "User.Read" ]
-  }
+"EntraId": {
+  "TenantId": "YOUR_TENANT_ID",
+  "ClientId": "YOUR_CLIENT_ID",
+  "Scopes": [ "User.Read" ]
 }
 ```
 
@@ -40,6 +43,23 @@ Open `appsettings.json` and replace the placeholder values with your app registr
 |---|---|
 | `TenantId` | Entra ID → Overview → **Directory (tenant) ID** |
 | `ClientId` | App registration → Overview → **Application (client) ID** |
+
+**ADFS**
+```json
+"Adfs": {
+  "Authority": "https://adfs.contoso.com/adfs/",
+  "ClientId": "YOUR_CLIENT_ID",
+  "Scopes": [ "https://your-resource-uri/" ]
+}
+```
+
+| Value | Where to find it |
+|---|---|
+| `Authority` | Your ADFS federation service URL |
+| `ClientId` | Application ID registered in ADFS |
+| `Scopes` | Resource URI of the application you're accessing |
+
+> Device code flow requires **ADFS 2019 or later**.
 
 ## 3. Run in VS Code
 
@@ -56,7 +76,7 @@ Open `appsettings.json` and replace the placeholder values with your app registr
 ### Option B: Debugger
 
 1. Open the **Run and Debug** panel (`Ctrl+Shift+D`)
-2. Click **Run and Debug** and select **.NET 8+ / C#**
+2. Click **Run and Debug** and select **.NET 9+ / C#**
 3. VS Code will build and launch the app
 
 ## 4. Sign In
@@ -77,7 +97,7 @@ and enter the code ABCD12345 to authenticate.
 
 ```
 DeviceCodeFlowApp/
-├── DeviceCodeFlowApp.csproj       # Project file — MSAL NuGet reference is here
+├── DeviceCodeFlowApp.csproj       # Project file — targets net10.0, MSAL NuGet reference is here
 ├── appsettings.json               # Tenant ID, Client ID, and scopes
 └── Program.cs                     # Device code flow logic and Graph call
 ```

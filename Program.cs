@@ -9,108 +9,201 @@ IConfiguration config = new ConfigurationBuilder()
     .AddJsonFile("appsettings.json", optional: false)
     .Build();
 
-string tenantId = config["AzureAd:TenantId"]
-    ?? throw new InvalidOperationException("AzureAd:TenantId is not set in appsettings.json");
-string clientId = config["AzureAd:ClientId"]
-    ?? throw new InvalidOperationException("AzureAd:ClientId is not set in appsettings.json");
-string[] scopes = config.GetSection("AzureAd:Scopes")
-    .GetChildren()
-    .Select(c => c.Value!)
-    .Where(v => !string.IsNullOrEmpty(v))
-    .DefaultIfEmpty("User.Read")
-    .ToArray();
+// ── Detect configured providers ──────────────────────────────────────────────
+bool entraidConfigured = IsConfigured(config["EntraId:TenantId"]) && IsConfigured(config["EntraId:ClientId"]);
+bool adfsConfigured    = IsConfigured(config["Adfs:Authority"])   && IsConfigured(config["Adfs:ClientId"]);
 
-// ── Build MSAL public client ──────────────────────────────────────────────────
-IPublicClientApplication app = PublicClientApplicationBuilder
-    .Create(clientId)
-    .WithAuthority(AzureCloudInstance.AzurePublic, tenantId)
-    .Build();
-
-// ── Acquire token via device code flow ───────────────────────────────────────
-Console.WriteLine("Acquiring token via device code flow...");
-Console.WriteLine();
-
-AuthenticationResult result;
-try
+if (!entraidConfigured && !adfsConfigured)
 {
-    result = await app.AcquireTokenWithDeviceCode(scopes, deviceCodeResult =>
+    Console.ForegroundColor = ConsoleColor.Red;
+    Console.WriteLine("No provider configured. Fill in EntraId or Adfs values in appsettings.json.");
+    Console.ResetColor();
+    return;
+}
+
+// ── Choose provider ───────────────────────────────────────────────────────────
+bool runEntraId = false, runAdfs = false;
+
+if (entraidConfigured && adfsConfigured)
+{
+    Console.WriteLine("Both providers are configured. Which would you like to use?");
+    Console.WriteLine("  [1] Entra ID");
+    Console.WriteLine("  [2] ADFS");
+    Console.WriteLine("  [3] Both");
+    Console.Write("Enter choice: ");
+    string? choice = Console.ReadLine()?.Trim();
+    Console.WriteLine();
+
+    runEntraId = choice == "1" || choice == "3";
+    runAdfs    = choice == "2" || choice == "3";
+
+    if (!runEntraId && !runAdfs)
     {
-        // Print the user-facing message (contains the URL and code)
-        Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.WriteLine(deviceCodeResult.Message);
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine("Invalid choice. Exiting.");
         Console.ResetColor();
-        Console.WriteLine();
-        return Task.CompletedTask;
-    }).ExecuteAsync();
+        return;
+    }
 }
-catch (MsalServiceException ex) when (ex.ErrorCode == "authorization_declined")
+else
 {
-    Console.ForegroundColor = ConsoleColor.Red;
-    Console.WriteLine("Sign-in was declined.");
+    runEntraId = entraidConfigured;
+    runAdfs    = adfsConfigured;
+}
+
+// ── Run flows ─────────────────────────────────────────────────────────────────
+if (runEntraId) await RunEntraIdFlow(config);
+if (runAdfs)    await RunAdfsFlow(config);
+
+// ── Check if a config value is set (non-null, non-placeholder) ────────────────
+static bool IsConfigured(string? value) =>
+    !string.IsNullOrWhiteSpace(value) && !value.StartsWith('<');
+
+// ── Entra ID device code flow ─────────────────────────────────────────────────
+async Task RunEntraIdFlow(IConfiguration cfg)
+{
+    string tenantId  = cfg["EntraId:TenantId"]!;
+    string clientId  = cfg["EntraId:ClientId"]!;
+    string[] scopes  = cfg.GetSection("EntraId:Scopes")
+        .GetChildren()
+        .Select(c => c.Value!)
+        .Where(v => !string.IsNullOrEmpty(v))
+        .DefaultIfEmpty("User.Read")
+        .ToArray();
+
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine("══ Entra ID ══════════════════════════════════════════════");
     Console.ResetColor();
-    return;
+
+    IPublicClientApplication app = PublicClientApplicationBuilder
+        .Create(clientId)
+        .WithAuthority(AzureCloudInstance.AzurePublic, tenantId)
+        .Build();
+
+    AuthenticationResult? result = await AcquireToken(app, scopes);
+    if (result is null) return;
+
+    ShowTokenSummary(result);
+    await CallGraphMe(result.AccessToken);
 }
-catch (MsalServiceException ex) when (ex.ErrorCode == "code_expired")
+
+// ── ADFS device code flow ─────────────────────────────────────────────────────
+async Task RunAdfsFlow(IConfiguration cfg)
 {
-    Console.ForegroundColor = ConsoleColor.Red;
-    Console.WriteLine("The device code expired. Please run the app again.");
+    string authority = cfg["Adfs:Authority"]!;
+    string clientId  = cfg["Adfs:ClientId"]!;
+    string[] scopes  = cfg.GetSection("Adfs:Scopes")
+        .GetChildren()
+        .Select(c => c.Value!)
+        .Where(v => !string.IsNullOrEmpty(v))
+        .ToArray();
+
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine("══ ADFS ══════════════════════════════════════════════════");
     Console.ResetColor();
-    return;
+
+    IPublicClientApplication app = PublicClientApplicationBuilder
+        .Create(clientId)
+        .WithAdfsAuthority(authority)
+        .Build();
+
+    AuthenticationResult? result = await AcquireToken(app, scopes);
+    if (result is null) return;
+
+    ShowTokenSummary(result);
 }
-catch (OperationCanceledException)
+
+// ── Shared: acquire token via device code ─────────────────────────────────────
+async Task<AuthenticationResult?> AcquireToken(IPublicClientApplication app, string[] scopes)
 {
-    Console.ForegroundColor = ConsoleColor.Yellow;
-    Console.WriteLine("Sign-in was cancelled.");
+    Console.WriteLine("Acquiring token via device code flow...");
+    Console.WriteLine();
+    try
+    {
+        return await app.AcquireTokenWithDeviceCode(scopes, deviceCodeResult =>
+        {
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine(deviceCodeResult.Message);
+            Console.ResetColor();
+            Console.WriteLine();
+            return Task.CompletedTask;
+        }).ExecuteAsync();
+    }
+    catch (MsalServiceException ex) when (ex.ErrorCode == "authorization_declined")
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("Sign-in was declined.");
+        Console.ResetColor();
+        return null;
+    }
+    catch (MsalServiceException ex) when (ex.ErrorCode == "code_expired")
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("The device code expired. Please run the app again.");
+        Console.ResetColor();
+        return null;
+    }
+    catch (OperationCanceledException)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine("Sign-in was cancelled.");
+        Console.ResetColor();
+        return null;
+    }
+}
+
+// ── Shared: show token summary ────────────────────────────────────────────────
+void ShowTokenSummary(AuthenticationResult result)
+{
+    Console.ForegroundColor = ConsoleColor.Green;
+    Console.WriteLine($"Successfully signed in as: {result.Account.Username}");
     Console.ResetColor();
-    return;
+    Console.WriteLine($"Token expires:  {result.ExpiresOn.ToLocalTime():g}");
+    Console.WriteLine($"Scopes granted: {string.Join(", ", result.Scopes)}");
+    Console.WriteLine();
 }
 
-// ── Show token summary ────────────────────────────────────────────────────────
-Console.ForegroundColor = ConsoleColor.Green;
-Console.WriteLine($"Successfully signed in as: {result.Account.Username}");
-Console.ResetColor();
-Console.WriteLine($"Token expires:  {result.ExpiresOn.ToLocalTime():g}");
-Console.WriteLine($"Scopes granted: {string.Join(", ", result.Scopes)}");
-Console.WriteLine();
-
-// ── Call Microsoft Graph /me ──────────────────────────────────────────────────
-Console.WriteLine("Calling Microsoft Graph /me ...");
-
-using HttpClient http = new();
-http.DefaultRequestHeaders.Authorization =
-    new AuthenticationHeaderValue("Bearer", result.AccessToken);
-http.DefaultRequestHeaders.Add("ConsistencyLevel", "eventual");
-
-HttpResponseMessage response = await http.GetAsync("https://graph.microsoft.com/v1.0/me");
-
-if (!response.IsSuccessStatusCode)
+// ── Entra ID only: call Microsoft Graph /me ───────────────────────────────────
+async Task CallGraphMe(string accessToken)
 {
-    Console.ForegroundColor = ConsoleColor.Red;
-    Console.WriteLine($"Graph call failed: {response.StatusCode}");
+    Console.WriteLine("Calling Microsoft Graph /me ...");
+
+    using HttpClient http = new();
+    http.DefaultRequestHeaders.Authorization =
+        new AuthenticationHeaderValue("Bearer", accessToken);
+    http.DefaultRequestHeaders.Add("ConsistencyLevel", "eventual");
+
+    HttpResponseMessage response = await http.GetAsync("https://graph.microsoft.com/v1.0/me");
+
+    if (!response.IsSuccessStatusCode)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"Graph call failed: {response.StatusCode}");
+        Console.ResetColor();
+        string error = await response.Content.ReadAsStringAsync();
+        Console.WriteLine(error);
+        return;
+    }
+
+    string json = await response.Content.ReadAsStringAsync();
+    using JsonDocument doc = JsonDocument.Parse(json);
+    JsonElement root = doc.RootElement;
+
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.Green;
+    Console.WriteLine("── /me response ─────────────────────────────────────────");
     Console.ResetColor();
-    string error = await response.Content.ReadAsStringAsync();
-    Console.WriteLine(error);
-    return;
+
+    string[] fields = ["displayName", "userPrincipalName", "id", "mail", "jobTitle", "officeLocation"];
+    foreach (string field in fields)
+    {
+        if (root.TryGetProperty(field, out JsonElement value) && value.ValueKind != JsonValueKind.Null)
+            Console.WriteLine($"  {field,-20} {value.GetString()}");
+    }
+
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.DarkGray;
+    Console.WriteLine("Raw JSON:");
+    Console.WriteLine(JsonSerializer.Serialize(root, new JsonSerializerOptions { WriteIndented = true }));
+    Console.ResetColor();
 }
-
-string json = await response.Content.ReadAsStringAsync();
-using JsonDocument doc = JsonDocument.Parse(json);
-JsonElement root = doc.RootElement;
-
-Console.WriteLine();
-Console.ForegroundColor = ConsoleColor.Green;
-Console.WriteLine("── /me response ─────────────────────────────────────────");
-Console.ResetColor();
-
-string[] fields = ["displayName", "userPrincipalName", "id", "mail", "jobTitle", "officeLocation"];
-foreach (string field in fields)
-{
-    if (root.TryGetProperty(field, out JsonElement value) && value.ValueKind != JsonValueKind.Null)
-        Console.WriteLine($"  {field,-20} {value.GetString()}");
-}
-
-Console.WriteLine();
-Console.ForegroundColor = ConsoleColor.DarkGray;
-Console.WriteLine("Raw JSON:");
-Console.WriteLine(JsonSerializer.Serialize(root, new JsonSerializerOptions { WriteIndented = true }));
-Console.ResetColor();
