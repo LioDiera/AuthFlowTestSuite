@@ -37,7 +37,7 @@ On your ADFS server (requires ADFS 2019 or later):
 3. Copy the generated **Client Identifier** — this is your `ClientId`
 4. For the redirect URI enter **urn:ietf:wg:oauth:2.0:oob** — this is a standard redirect URI
 5. On the **Configure Web API** screen:
-   - Set the **Identifier** to the resource URI your client will request a token for (e.g. `https://your-app/`)
+   - Set the **Identifier** to the resource URI your client will request a token for (e.g. `https://your-resource-uri/`)
    - This becomes the base of your `Scopes` value
 6. On the **Apply Access Control Policy** screen, choose an appropriate policy (e.g. **Permit everyone**)
 7. On the **Configure Application Permissions** screen, ensure the native app is permitted to request the openid and profile scopes.
