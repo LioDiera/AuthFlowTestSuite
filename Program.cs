@@ -113,6 +113,9 @@ async Task RunAdfsFlow(IConfiguration cfg)
     if (result is null) return;
 
     ShowTokenSummary(result);
+    DecodeJwtClaims("Access token claims", result.AccessToken);
+    if (!string.IsNullOrEmpty(result.IdToken))
+        DecodeJwtClaims("ID token claims", result.IdToken);
     await CallAdfsUserInfo(authority, result.AccessToken);
 }
 
@@ -163,6 +166,35 @@ void ShowTokenSummary(AuthenticationResult result)
     Console.ResetColor();
     Console.WriteLine($"Token expires:  {result.ExpiresOn.ToLocalTime():g}");
     Console.WriteLine($"Scopes granted: {string.Join(", ", result.Scopes)}");
+    Console.WriteLine();
+}
+
+// ── ADFS only: decode and display JWT payload claims ──────────────────────────
+void DecodeJwtClaims(string label, string jwt)
+{
+    string[] parts = jwt.Split('.');
+    if (parts.Length < 2) return;
+
+    // Base64url decode the payload
+    string payload = parts[1];
+    int pad = (4 - payload.Length % 4) % 4;
+    payload += new string('=', pad);
+    payload = payload.Replace('-', '+').Replace('_', '/');
+
+    string json;
+    try { json = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(payload)); }
+    catch { return; }
+
+    using JsonDocument doc = JsonDocument.Parse(json);
+
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.Green;
+    Console.WriteLine($"── {label} ──────────────────────────────────────────────");
+    Console.ResetColor();
+
+    foreach (JsonProperty prop in doc.RootElement.EnumerateObject())
+        Console.WriteLine($"  {prop.Name,-30} {prop.Value}");
+
     Console.WriteLine();
 }
 
