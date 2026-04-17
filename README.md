@@ -43,11 +43,6 @@ On your ADFS server (requires ADFS 2019 or later):
 7. On the **Configure Application Permissions** screen, ensure the native app is permitted to request the openid and profile scopes.
 8. Click **Next** and **Close** to finish
 
-> To enable device code flow, run the following on the ADFS server:
-> ```powershell
-> Grant-AdfsApplicationPermission -ClientRoleIdentifier "<your-client-id>" -ServerRoleIdentifier "<your-resource-uri>" -ScopeNames "openid"
-> Set-AdfsApplicationPermission -TargetClientRoleIdentifier "<your-client-id>" -AddScopeNames "openid"
-> ```
 
 ## 2. Configure appsettings.json
 
