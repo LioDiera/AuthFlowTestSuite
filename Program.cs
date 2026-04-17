@@ -96,6 +96,8 @@ async Task RunAdfsFlow(IConfiguration cfg)
         .GetChildren()
         .Select(c => c.Value!)
         .Where(v => !string.IsNullOrEmpty(v))
+        .Append("allatclaims")
+        .Distinct()
         .ToArray();
 
     Console.ForegroundColor = ConsoleColor.Cyan;
@@ -111,6 +113,7 @@ async Task RunAdfsFlow(IConfiguration cfg)
     if (result is null) return;
 
     ShowTokenSummary(result);
+    await CallAdfsUserInfo(authority, result.AccessToken);
 }
 
 // ── Shared: acquire token via device code ─────────────────────────────────────
@@ -160,6 +163,44 @@ void ShowTokenSummary(AuthenticationResult result)
     Console.ResetColor();
     Console.WriteLine($"Token expires:  {result.ExpiresOn.ToLocalTime():g}");
     Console.WriteLine($"Scopes granted: {string.Join(", ", result.Scopes)}");
+    Console.WriteLine();
+}
+
+// ── ADFS only: call userinfo endpoint ───────────────────────────────────────
+async Task CallAdfsUserInfo(string authority, string accessToken)
+{
+    string userInfoUrl = authority.TrimEnd('/') + "/userinfo";
+    Console.WriteLine($"Calling ADFS userinfo endpoint: {userInfoUrl} ...");
+
+    using HttpClient http = new();
+    http.DefaultRequestHeaders.Authorization =
+        new AuthenticationHeaderValue("Bearer", accessToken);
+
+    HttpResponseMessage response = await http.GetAsync(userInfoUrl);
+
+    if (!response.IsSuccessStatusCode)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"Userinfo call failed: {response.StatusCode}");
+        Console.ResetColor();
+        string error = await response.Content.ReadAsStringAsync();
+        Console.WriteLine(error);
+        return;
+    }
+
+    string json = await response.Content.ReadAsStringAsync();
+    using JsonDocument doc = JsonDocument.Parse(json);
+    JsonElement root = doc.RootElement;
+
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.Green;
+    Console.WriteLine("── userinfo response ────────────────────────────────────");
+    Console.ResetColor();
+
+    foreach (JsonProperty prop in root.EnumerateObject())
+    {
+        Console.WriteLine($"  {prop.Name,-20} {prop.Value}");
+    }
     Console.WriteLine();
 }
 
