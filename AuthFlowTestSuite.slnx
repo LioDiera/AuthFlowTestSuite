@@ -1,0 +1,8 @@
+<Solution>
+  <Project Path="ClientCredentialsApp/ClientCredentialsApp.csproj" />
+  <Project Path="DeviceCodeFlowApp/DeviceCodeFlowApp.csproj" />
+  <Project Path="InteractiveAuthApp/InteractiveAuthApp.csproj" />
+  <Project Path="IWAApp/IWAApp.csproj" />
+  <Project Path="OBOApp/OBOApp.csproj" />
+  <Project Path="ROPCApp/ROPCApp.csproj" />
+</Solution>
