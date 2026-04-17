@@ -91,12 +91,6 @@ Open `appsettings.json` and fill in the values for the provider(s) you want to u
    dotnet run
    ```
 
-### Option B: Debugger
-
-1. Open the **Run and Debug** panel (`Ctrl+Shift+D`)
-2. Click **Run and Debug** and select **.NET 9+ / C#**
-3. VS Code will build and launch the app
-
 ## 4. Sign In
 
 If both providers are configured, the app will prompt you to choose:
