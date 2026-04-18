@@ -10,7 +10,7 @@ The app supports two client types, detected automatically from `appsettings.json
 | App registration type | Mobile/desktop | Web |
 | PKCE | MSAL-managed (automatic) | Controlled by `UsePkce` in appsettings |
 | Auth code redirect | MSAL's loopback listener | App's local `HttpListener` |
-| Redirect URI registered | `http://localhost` | `http://localhost` |
+| Redirect URI registered | `http://localhost:8400` | `http://localhost:8400` |
 
 > The docs recommend public client + PKCE for native/desktop apps. The confidential client path is provided to allow testing when the app registration requires a secret (e.g. `AADSTS7000218`).
 
@@ -34,7 +34,7 @@ In the [Azure portal](https://portal.azure.com):
 2. Give it a name and click **Register**
 3. On the **Authentication** tab:
    - Click **Add a platform → Mobile and desktop applications**
-   - Check **http://localhost** as a redirect URI
+   - Add **http://localhost:8400** as a redirect URI
    - Under **Advanced settings**, set **Allow public client flows** to **Yes**
    - Click **Save**
 4. On the **API permissions** tab:
@@ -47,10 +47,10 @@ In the [Azure portal](https://portal.azure.com):
 2. Give it a name and click **Register**
 3. On the **Authentication** tab:
    - Click **Add a platform → Web**
-   - Set the **Redirect URI** to `http://localhost`
+   - Set the **Redirect URI** to `http://localhost:8400`
    - Click **Configure**
 
-   > **Important:** You must use the **Web** platform here, not Mobile/desktop. The redirect URI must be `http://localhost` exactly — Entra ID's localhost exception then accepts any port at runtime.
+   > **Important:** You must use the **Web** platform here, not Mobile/desktop.
 
 4. On the **Certificates & secrets** tab:
    - Click **New client secret**, give it a description and expiry, and click **Add**
@@ -59,7 +59,7 @@ In the [Azure portal](https://portal.azure.com):
    - Ensure **Microsoft Graph → User.Read** (delegated) is present
    - Click **Grant admin consent** if required by your tenant
 
-> Entra ID treats `http://localhost` as a [localhost exception](https://learn.microsoft.com/en-us/entra/identity-platform/reply-url#localhost-exceptions) and accepts any port, so the dynamic port the app picks will match.
+> Set `"RedirectUri": "http://localhost:8400"` in appsettings.json to match.
 
 ### ADFS
 
@@ -68,7 +68,7 @@ On your ADFS server (requires ADFS 2016 or later):
 1. Open **AD FS Management** and go to **Application Groups → Add Application Group**
 2. Select **Native application accessing a web API** and give it a name
 3. Copy the generated **Client Identifier** — this is your `ClientId`
-4. Add **http://localhost** as a redirect URI
+4. Add **http://localhost:8400** as a redirect URI
 5. On the **Configure Web API** screen:
    - Set the **Identifier** to the resource URI your client will request a token for (e.g. `https://your-resource-uri/`)
    - This becomes the base of your `Scopes` value
@@ -107,7 +107,7 @@ Open `appsettings.json` and fill in the values for the provider(s) you want to u
 | `TenantId` | Entra ID → Overview → **Directory (tenant) ID** |
 | `ClientId` | App registration → Overview → **Application (client) ID** |
 | `ClientSecret` | App registration → Certificates & secrets → **Value** (leave blank for public client) |
-| `RedirectUri` | Optional. When blank, the app picks a free port dynamically — Entra ID's localhost exception accepts any port. Set a fixed value (e.g. `http://localhost:8400/`) if you prefer a predictable URI. |
+| `RedirectUri` | Redirect URI registered in the app registration. Use `http://localhost:8400` for both Entra ID and ADFS to keep it consistent. |
 | `UsePkce` | `true` — adds `code_challenge` to the authorization request and `code_verifier` to the token exchange. `false` — client secret only (no PKCE). |
 
 **ADFS**
@@ -154,7 +154,7 @@ Both providers are configured. Which would you like to use?
 Enter choice:
 ```
 
-After choosing, the app opens your default browser to the sign-in page. Once you sign in, the browser redirects back to `http://localhost` and the app continues automatically.
+After choosing, the app opens your default browser to the sign-in page. Once you sign in, the browser redirects back to `http://localhost:8400` and the app continues automatically.
 
 ```
 ══ Entra ID ══════════════════════════════════════════════
