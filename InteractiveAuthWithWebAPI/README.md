@@ -32,11 +32,12 @@ This solution requires **two separate app registrations** — one for the API th
 In the [Azure portal](https://portal.azure.com):
 
 1. Go to **Microsoft Entra ID → App registrations → New registration**
-2. Name it (e.g. `SweetSalesAPI`), optionally add a description such as *"Protected inventory API — part of the InteractiveAuthWithWebAPI test deployment"*, and click **Register** — no redirect URI needed
-3. On the **Expose an API** tab:
+2. Name it (e.g. `SweetSalesAPI`) and click **Register** — no redirect URI needed
+3. *(Optional)* On the **Branding & properties** tab, add a description such as *"Protected inventory API — part of the InteractiveAuthWithWebAPI test deployment"*
+4. On the **Expose an API** tab:
    - Click **Add** next to *Application ID URI* — accept the default `api://<client-id>` and click **Save**
    - Click **Add a scope**, name it `access_as_user`, set **Who can consent** to *Admins and users*, fill in the display name and description, and click **Add scope**
-4. Note the **Application (client) ID** — this is `YOUR_API_CLIENT_ID`
+5. Note the **Application (client) ID** — this is `YOUR_API_CLIENT_ID`
 
 #### Step B — Register the Client (console app)
 
