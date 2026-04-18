@@ -508,6 +508,7 @@ async Task<TokenResult?> AcquireTokenConfidential(
           </main>
 
           <footer>Sweet Sales POS v2.1 — Bakery Edition &nbsp;|&nbsp; © 2026 Crumb & Co.</footer>
+          <script>history.replaceState(null, '', location.pathname);</script>
         </body>
         </html>
         """;
