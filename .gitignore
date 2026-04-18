@@ -5,6 +5,8 @@ obj/
 # VS / Rider
 .vs/
 *.user
+# App settings with real credentials — keep local only
 InteractiveAuthApp/appsettings.json
 InteractiveAuthWithWebAPI/appsettings.json
 InteractiveAuthWithWebAPI/SweetSalesAPI/appsettings.json
+InteractiveAuthWithWebAPI/SweetSalesAPI/appsettings.Development.json
