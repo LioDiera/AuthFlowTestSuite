@@ -9,4 +9,3 @@ obj/
 InteractiveAuthApp/appsettings.json
 InteractiveAuthWithWebAPI/appsettings.json
 InteractiveAuthWithWebAPI/SweetSalesAPI/appsettings.json
-InteractiveAuthWithWebAPI/SweetSalesAPI/appsettings.Development.json
