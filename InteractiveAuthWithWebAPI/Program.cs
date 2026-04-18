@@ -312,9 +312,7 @@ async Task ServePosApp(string accessToken, string apiBaseUrl)
     Console.ForegroundColor = ConsoleColor.Green;
     Console.WriteLine($"Sweet Sales POS running at {listenOn}");
     Console.ResetColor();
-    Console.WriteLine("Opening browser... Press Ctrl+C to stop.");
-
-    OpenBrowser(listenOn);
+    Console.WriteLine("Press Ctrl+C to stop.");
 
     using HttpClient apiClient = new();
     apiClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
