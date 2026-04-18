@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
@@ -257,6 +258,52 @@ async Task ServePosApp(string accessToken, string apiBaseUrl)
     using var listener = new HttpListener();
     listener.Prefixes.Add(listenOn);
     listener.Start();
+
+    // Launch SweetSalesAPI as a child process if it isn't already listening
+    Process? apiProcess = null;
+    bool portInUse = System.Net.NetworkInformation.IPGlobalProperties
+        .GetIPGlobalProperties().GetActiveTcpListeners()
+        .Any(e => e.Port == 7001);
+
+    if (!portInUse)
+    {
+        string apiDir = Path.GetFullPath(
+            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "SweetSalesAPI"));
+        apiProcess = new Process
+        {
+            StartInfo = new ProcessStartInfo("dotnet", "run")
+            {
+                WorkingDirectory      = apiDir,
+                UseShellExecute       = false,
+                RedirectStandardOutput = false,
+                RedirectStandardError  = false,
+                CreateNoWindow        = false,
+            }
+        };
+        apiProcess.Start();
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine("Starting SweetSalesAPI...");
+        Console.ResetColor();
+        // Give Kestrel a moment to bind
+        await Task.Delay(3000);
+    }
+
+    // Ensure API is killed when this process exits
+    Console.CancelKeyPress += (_, e) =>
+    {
+        e.Cancel = true;
+        listener.Stop();
+        if (apiProcess is { HasExited: false })
+        {
+            apiProcess.Kill(entireProcessTree: true);
+            Console.WriteLine("SweetSalesAPI stopped.");
+        }
+    };
+    AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+    {
+        if (apiProcess is { HasExited: false })
+            apiProcess.Kill(entireProcessTree: true);
+    };
 
     Console.WriteLine();
     Console.ForegroundColor = ConsoleColor.Green;
