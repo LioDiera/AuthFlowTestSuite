@@ -120,18 +120,24 @@ Open this file and fill in the values for the provider(s) you want to use. Leave
 ### API — `InteractiveAuthWithWebAPI/SweetSalesAPI/appsettings.json`
 
 ```json
-"Auth": {
+"EntraId": {
   "Authority": "https://login.microsoftonline.com/YOUR_TENANT_ID/v2.0",
   "Audience": "api://YOUR_API_CLIENT_ID"
+},
+"Adfs": {
+  "Authority": "https://YOUR_ADFS_HOST/adfs/",
+  "Audience": "YOUR_API_RESOURCE_URI"
 }
 ```
 
 | Value | Where to find it |
 |---|---|
-| `Authority` | Entra ID token issuer — replace `YOUR_TENANT_ID` with your Directory (tenant) ID |
-| `Audience` | **API** app registration → Overview → **Application (client) ID** |
+| `EntraId.Authority` | Entra ID token issuer — replace `YOUR_TENANT_ID` with your Directory (tenant) ID |
+| `EntraId.Audience` | **API** app registration → Overview → **Application (client) ID** (with `api://` prefix) |
+| `Adfs.Authority` | Your ADFS federation service URL (e.g. `https://adfs.contoso.com/adfs/`) |
+| `Adfs.Audience` | The Web API Identifier (resource URI) configured in the ADFS Application Group |
 
-> For ADFS, set `Authority` to your ADFS federation service URL (e.g. `https://adfs.contoso.com/adfs`) and `Audience` to the Web API Identifier (resource URI) configured in step 5 of the ADFS registration.
+The API accepts tokens from either provider — it peeks at the issuer claim in the JWT and routes to the correct validator automatically.
 
 ## 3. Run in VS Code
 
