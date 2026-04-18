@@ -6,3 +6,5 @@ obj/
 .vs/
 *.user
 InteractiveAuthApp/appsettings.json
+InteractiveAuthWithWebAPI/appsettings.json
+InteractiveAuthWithWebAPI/SweetSalesAPI/appsettings.json
