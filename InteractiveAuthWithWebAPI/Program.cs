@@ -309,7 +309,7 @@ async Task ServePosApp(string accessToken, string apiBaseUrl)
     }
 }
 
-// ── POS HTML — token injected server-side, Inventory tab calls /api/inventory ─
+// ── POS HTML — fully interactive SPA backed by /api/inventory and /api/settings ─
 static string BuildPosHtml(string accessToken) => $$"""
     <!DOCTYPE html>
     <html lang="en">
@@ -318,57 +318,69 @@ static string BuildPosHtml(string accessToken) => $$"""
       <meta name="viewport" content="width=device-width, initial-scale=1"/>
       <title>Sweet Sales POS</title>
       <style>
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
         body { min-height:100vh; display:flex; flex-direction:column;
                font-family:"Segoe UI",system-ui,-apple-system,sans-serif;
                background:#fdf6ee; color:#2c1a0e; }
 
-        header { background:#7b3f00; color:#fff; padding:0 32px; height:56px;
+        /* ── Header ── */
+        header { background:#7b3f00; color:#fff; padding:0 28px; height:56px;
                  display:flex; align-items:center; justify-content:space-between;
-                 box-shadow:0 2px 6px rgba(0,0,0,.25); }
-        .brand { display:flex; align-items:center; gap:10px; font-size:1.15rem; font-weight:700; }
+                 box-shadow:0 2px 6px rgba(0,0,0,.25); flex-shrink:0; }
+        .brand { display:flex; align-items:center; gap:10px; font-size:1.1rem; font-weight:700; }
         nav { display:flex; gap:4px; font-size:.85rem; }
         nav button { background:transparent; border:none; color:rgba(255,255,255,.75);
                      font:inherit; padding:6px 14px; border-radius:8px; cursor:pointer; transition:.15s; }
-        nav button:hover, nav button.active { background:rgba(255,255,255,.15); color:#fff; }
+        nav button:hover, nav button.active { background:rgba(255,255,255,.18); color:#fff; }
 
-        main { flex:1; display:grid; grid-template-columns:220px 1fr 280px; }
+        /* ── Layout ── */
+        main { flex:1; display:grid; grid-template-columns:220px 1fr 300px; min-height:0; overflow:hidden; }
 
-        .sidebar { background:#fff8f0; border-right:1px solid #e8d5c0; padding:20px 16px; }
-        .sidebar h3 { font-size:.7rem; text-transform:uppercase; letter-spacing:1px;
+        /* ── Sidebar / Categories ── */
+        .sidebar { background:#fff8f0; border-right:1px solid #e8d5c0;
+                   padding:20px 14px; overflow-y:auto; }
+        .sidebar h3 { font-size:.68rem; text-transform:uppercase; letter-spacing:1px;
                       color:#a0714f; margin-bottom:12px; }
-        .cat-item { display:flex; align-items:center; gap:10px; padding:10px 12px;
-                    border-radius:10px; cursor:pointer; font-size:.9rem; transition:.15s; margin-bottom:4px; }
+        .cat-item { display:flex; align-items:center; gap:10px; padding:9px 12px;
+                    border-radius:10px; cursor:pointer; font-size:.88rem;
+                    transition:.15s; margin-bottom:3px; user-select:none; }
         .cat-item:hover  { background:#f4e4d4; }
         .cat-item.active { background:#7b3f00; color:#fff; }
-        .cat-item .emoji { font-size:1.2rem; }
+        .cat-item .emoji { font-size:1.15rem; }
 
-        .panel { padding:24px; overflow-y:auto; }
-        .panel h2 { font-size:1.1rem; font-weight:600; margin-bottom:16px; color:#5c2d0a; }
+        /* ── Content panels ── */
+        .panel { padding:22px 24px; overflow-y:auto; }
+        .panel h2 { font-size:1.05rem; font-weight:700; margin-bottom:16px; color:#5c2d0a; }
 
-        .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:16px; }
+        /* ── Product grid (Dashboard) ── */
+        .product-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(148px,1fr)); gap:14px; }
         .product-card { background:#fff; border:1px solid #e8d5c0; border-radius:14px;
-                        padding:16px 12px; text-align:center; cursor:pointer; position:relative; transition:.15s; }
-        .product-card:hover { transform:translateY(-3px); box-shadow:0 8px 20px rgba(123,63,0,.12); }
-        .product-card .big-emoji { font-size:2.4rem; display:block; margin-bottom:8px; }
-        .product-card .name  { font-size:.85rem; font-weight:600; margin-bottom:4px; }
-        .product-card .price { font-size:.8rem; color:#a0714f; }
+                        padding:16px 12px; text-align:center; cursor:pointer; position:relative;
+                        transition:.15s; user-select:none; }
+        .product-card:hover  { transform:translateY(-3px); box-shadow:0 8px 20px rgba(123,63,0,.13); }
+        .product-card:active { transform:translateY(0); }
+        .product-card .big-emoji { font-size:2.3rem; display:block; margin-bottom:8px; }
+        .product-card .name  { font-size:.82rem; font-weight:600; margin-bottom:3px; }
+        .product-card .price { font-size:.78rem; color:#a0714f; }
         .badge { position:absolute; top:8px; right:8px; background:#e05c00; color:#fff;
-                 font-size:.65rem; font-weight:700; padding:2px 7px; border-radius:20px; }
+                 font-size:.62rem; font-weight:700; padding:2px 7px; border-radius:20px; pointer-events:none; }
+        .out-card { opacity:.45; cursor:not-allowed; }
 
-        .toolbar { display:flex; gap:8px; margin-bottom:16px; align-items:center; }
-        .toolbar input { flex:1; padding:8px 12px; border:1px solid #e8d5c0;
+        /* ── Toolbar / Table shared ── */
+        .toolbar { display:flex; gap:8px; margin-bottom:16px; align-items:center; flex-wrap:wrap; }
+        .toolbar input { flex:1; min-width:140px; padding:8px 12px; border:1px solid #e8d5c0;
                          border-radius:8px; font:inherit; font-size:.85rem; }
-        .btn { padding:8px 16px; border:none; border-radius:8px; font:inherit;
-               font-size:.82rem; font-weight:600; cursor:pointer; transition:.15s; }
+        .btn { padding:7px 15px; border:none; border-radius:8px; font:inherit;
+               font-size:.81rem; font-weight:600; cursor:pointer; transition:.15s; white-space:nowrap; }
         .btn-primary { background:#7b3f00; color:#fff; }
         .btn-primary:hover { background:#6a3600; }
         .btn-danger  { background:#e05c00; color:#fff; }
         .btn-danger:hover { background:#c04e00; }
         .btn-ghost   { background:transparent; border:1px solid #e8d5c0; color:#5c2d0a; }
         .btn-ghost:hover { background:#f4e4d4; }
+        .btn-sm { padding:4px 10px; font-size:.76rem; }
 
-        table { width:100%; border-collapse:collapse; font-size:.85rem; }
+        table { width:100%; border-collapse:collapse; font-size:.84rem; }
         thead th { text-align:left; padding:8px 12px; background:#f5e6d6;
                    color:#7b3f00; font-weight:600; border-bottom:2px solid #e8d5c0; }
         tbody tr { border-bottom:1px solid #f0e0cc; }
@@ -376,80 +388,127 @@ static string BuildPosHtml(string accessToken) => $$"""
         td { padding:8px 12px; vertical-align:middle; }
         td.actions { display:flex; gap:6px; }
         .stock-badge { display:inline-block; padding:2px 8px; border-radius:12px;
-                       font-size:.75rem; font-weight:700; }
+                       font-size:.73rem; font-weight:700; }
         .stock-ok  { background:#d4edda; color:#155724; }
         .stock-low { background:#fff3cd; color:#856404; }
         .stock-out { background:#f8d7da; color:#721c24; }
 
+        /* ── Reports ── */
+        .kpi-row { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:14px; margin-bottom:24px; }
+        .kpi { background:#fff; border:1px solid #e8d5c0; border-radius:14px; padding:18px 16px; }
+        .kpi .kpi-label { font-size:.72rem; text-transform:uppercase; letter-spacing:.8px; color:#a0714f; margin-bottom:6px; }
+        .kpi .kpi-value { font-size:1.5rem; font-weight:700; color:#5c2d0a; }
+        .section-title { font-size:.78rem; font-weight:700; text-transform:uppercase;
+                         letter-spacing:.8px; color:#a0714f; margin:0 0 10px; }
+        .cat-sales { display:grid; grid-template-columns:1fr; gap:6px; }
+        .cat-bar { display:grid; grid-template-columns:90px 1fr 50px; align-items:center; gap:8px; font-size:.82rem; }
+        .bar-track { background:#f0e0cc; border-radius:6px; height:8px; overflow:hidden; }
+        .bar-fill  { background:#7b3f00; height:100%; border-radius:6px; transition:width .4s; }
+
+        /* ── Settings form ── */
+        .settings-form { max-width:440px; }
+        .settings-form .form-row { display:flex; flex-direction:column; gap:4px; margin-bottom:16px; }
+        .settings-form label { font-size:.78rem; font-weight:600; color:#7b3f00; }
+        .settings-form input { padding:8px 10px; border:1px solid #e8d5c0;
+                                border-radius:8px; font:inherit; font-size:.85rem; }
+        .settings-form input:focus { outline:none; border-color:#7b3f00;
+                                      box-shadow:0 0 0 2px rgba(123,63,0,.15); }
+
+        /* ── Modal ── */
         .modal-bg { display:none; position:fixed; inset:0; background:rgba(0,0,0,.35);
                     align-items:center; justify-content:center; z-index:100; }
         .modal-bg.open { display:flex; }
-        .modal { background:#fff; border-radius:16px; padding:32px; width:440px;
+        .modal { background:#fff; border-radius:16px; padding:30px; width:440px;
                  box-shadow:0 24px 64px rgba(0,0,0,.2); }
-        .modal h3 { font-size:1rem; font-weight:700; margin-bottom:20px; color:#5c2d0a; }
-        .form-row { display:flex; flex-direction:column; gap:4px; margin-bottom:14px; }
+        .modal h3 { font-size:1rem; font-weight:700; margin-bottom:18px; color:#5c2d0a; }
+        .form-row { display:flex; flex-direction:column; gap:4px; margin-bottom:13px; }
         .form-row label { font-size:.78rem; font-weight:600; color:#7b3f00; }
         .form-row input, .form-row select {
             padding:8px 10px; border:1px solid #e8d5c0; border-radius:8px; font:inherit; font-size:.85rem; }
         .form-row input:focus, .form-row select:focus {
             outline:none; border-color:#7b3f00; box-shadow:0 0 0 2px rgba(123,63,0,.15); }
-        .modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:20px; }
+        .modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:18px; }
 
-        .order-panel { background:#fff; border-left:1px solid #e8d5c0; padding:24px 20px;
-                       display:flex; flex-direction:column; }
-        .order-panel h3 { font-size:1rem; font-weight:700; margin-bottom:16px; color:#5c2d0a; }
-        .order-item { display:flex; justify-content:space-between; align-items:center;
-                      padding:8px 0; border-bottom:1px dashed #e8d5c0; font-size:.85rem; }
-        .order-item .qty { background:#fde8d0; border-radius:6px; padding:2px 8px; font-weight:700; font-size:.8rem; }
-        .total-row { display:flex; justify-content:space-between; margin-top:16px; font-weight:700; font-size:1rem; }
+        /* ── Order panel ── */
+        .order-panel { background:#fff; border-left:1px solid #e8d5c0;
+                       padding:22px 18px; display:flex; flex-direction:column; overflow-y:auto; }
+        .order-panel h3 { font-size:1rem; font-weight:700; margin-bottom:14px; color:#5c2d0a; }
+        #order-items { flex:1; overflow-y:auto; }
+        .order-item { display:grid; grid-template-columns:1fr auto auto; align-items:center;
+                      gap:8px; padding:7px 0; border-bottom:1px dashed #e8d5c0; font-size:.84rem; }
+        .order-item-name { font-weight:500; }
+        .qty-controls { display:flex; align-items:center; gap:4px; }
+        .qty-btn { width:22px; height:22px; border:1px solid #e8d5c0; background:#fff;
+                   border-radius:6px; font-size:.8rem; font-weight:700; cursor:pointer;
+                   display:flex; align-items:center; justify-content:center; transition:.12s; }
+        .qty-btn:hover { background:#f4e4d4; }
+        .qty-num { min-width:18px; text-align:center; font-weight:700; font-size:.82rem; }
+        .order-item-price { font-size:.82rem; color:#5c2d0a; text-align:right; white-space:nowrap; }
+        .order-empty { color:#c0a080; font-size:.85rem; text-align:center; padding:24px 0; }
+        .order-footer { margin-top:14px; padding-top:12px; border-top:2px solid #e8d5c0; }
+        .tax-row, .total-row { display:flex; justify-content:space-between; font-size:.85rem; margin-bottom:5px; }
+        .total-row { font-size:1.05rem; font-weight:700; margin-bottom:14px; }
+        .checkout-btn { width:100%; padding:11px; background:#7b3f00; color:#fff;
+                        border:none; border-radius:10px; font:inherit; font-size:.9rem;
+                        font-weight:700; cursor:pointer; transition:.15s; }
+        .checkout-btn:hover { background:#6a3600; }
+        .checkout-btn:disabled { background:#c0a080; cursor:not-allowed; }
+        .clear-btn { width:100%; margin-top:7px; padding:7px; background:transparent;
+                     border:1px solid #e8d5c0; border-radius:10px; font:inherit;
+                     font-size:.8rem; cursor:pointer; color:#a0714f; transition:.15s; }
+        .clear-btn:hover { background:#fdf0e6; }
 
+        /* ── Footer / toast ── */
         footer { background:#f5e6d6; border-top:1px solid #e8d5c0; text-align:center;
-                 padding:10px; font-size:.72rem; color:#b08060; }
-
+                 padding:9px; font-size:.7rem; color:#b08060; flex-shrink:0; }
         .toast { position:fixed; bottom:24px; right:24px; background:#2d6a3f; color:#fff;
                  padding:10px 18px; border-radius:10px; font-size:.82rem; font-weight:600;
-                 opacity:0; transition:opacity .3s; pointer-events:none; z-index:200; }
+                 opacity:0; transition:opacity .3s; pointer-events:none; z-index:300; }
         .toast.show { opacity:1; }
+        .toast.error { background:#c0392b; }
       </style>
     </head>
     <body>
       <header>
-        <div class="brand"><span>🥐</span> Sweet Sales POS</div>
+        <div class="brand" id="brand-name"><span>🥐</span> Sweet Sales POS</div>
         <nav>
-          <button class="active" onclick="showTab('pastries',this)">Dashboard</button>
-          <button onclick="showTab('inventory',this)">Inventory</button>
-          <button>Reports</button>
-          <button>Settings</button>
+          <button class="active" data-tab="dashboard" onclick="showTab('dashboard',this)">Dashboard</button>
+          <button data-tab="reports"   onclick="showTab('reports',this)">Reports</button>
+          <button data-tab="inventory" onclick="showTab('inventory',this)">Inventory</button>
+          <button data-tab="settings"  onclick="showTab('settings',this)">Settings</button>
         </nav>
       </header>
 
       <main>
+        <!-- ── Sidebar ──────────────────────────────────── -->
         <aside class="sidebar">
           <h3>Categories</h3>
-          <div class="cat-item active"><span class="emoji">🥐</span> Pastries</div>
-          <div class="cat-item"><span class="emoji">🎂</span> Cakes</div>
-          <div class="cat-item"><span class="emoji">🍪</span> Cookies</div>
-          <div class="cat-item"><span class="emoji">🥖</span> Breads</div>
-          <div class="cat-item"><span class="emoji">🧁</span> Cupcakes</div>
-          <div class="cat-item"><span class="emoji">🥧</span> Pies</div>
-          <div class="cat-item"><span class="emoji">☕</span> Drinks</div>
+          <div id="cat-list"></div>
         </aside>
 
-        <section class="panel" id="pastries-view">
-          <h2>Pastries — Today's Selection</h2>
-          <div class="grid">
-            <div class="product-card"><span class="big-emoji">🥐</span><div class="name">Butter Croissant</div><div class="price">$3.50</div></div>
-            <div class="product-card"><span class="badge">Hot</span><span class="big-emoji">🥨</span><div class="name">Pretzel Twist</div><div class="price">$2.75</div></div>
-            <div class="product-card"><span class="big-emoji">🍩</span><div class="name">Glazed Donut</div><div class="price">$2.25</div></div>
-            <div class="product-card"><span class="badge">New</span><span class="big-emoji">🧇</span><div class="name">Belgian Waffle</div><div class="price">$5.00</div></div>
-            <div class="product-card"><span class="big-emoji">🥯</span><div class="name">Everything Bagel</div><div class="price">$3.00</div></div>
-            <div class="product-card"><span class="big-emoji">🍋</span><div class="name">Lemon Danish</div><div class="price">$4.25</div></div>
-            <div class="product-card"><span class="big-emoji">🍫</span><div class="name">Pain au Chocolat</div><div class="price">$4.00</div></div>
-            <div class="product-card"><span class="badge">Sale</span><span class="big-emoji">🥐</span><div class="name">Almond Croissant</div><div class="price">$3.75</div></div>
-          </div>
+        <!-- ── Dashboard ────────────────────────────────── -->
+        <section class="panel" id="tab-dashboard">
+          <h2 id="dash-heading">All Items</h2>
+          <div class="product-grid" id="product-grid"></div>
         </section>
 
-        <section class="panel" id="inv-view" style="display:none">
+        <!-- ── Reports ──────────────────────────────────── -->
+        <section class="panel" id="tab-reports" style="display:none">
+          <h2>Reports</h2>
+          <div class="kpi-row">
+            <div class="kpi"><div class="kpi-label">Items in Inventory</div><div class="kpi-value" id="rpt-total-items">—</div></div>
+            <div class="kpi"><div class="kpi-label">Total Stock Units</div><div class="kpi-value" id="rpt-total-stock">—</div></div>
+            <div class="kpi"><div class="kpi-label">Low Stock Items</div><div class="kpi-value" id="rpt-low-stock">—</div></div>
+            <div class="kpi"><div class="kpi-label">Out of Stock</div><div class="kpi-value" id="rpt-out-stock">—</div></div>
+            <div class="kpi"><div class="kpi-label">Avg. Price</div><div class="kpi-value" id="rpt-avg-price">—</div></div>
+            <div class="kpi"><div class="kpi-label">Inventory Value</div><div class="kpi-value" id="rpt-inv-value">—</div></div>
+          </div>
+          <p class="section-title">Stock by Category</p>
+          <div class="cat-sales" id="rpt-cat-bars"></div>
+        </section>
+
+        <!-- ── Inventory ─────────────────────────────────── -->
+        <section class="panel" id="tab-inventory" style="display:none">
           <h2>Inventory</h2>
           <div class="toolbar">
             <input id="search" placeholder="Search items…" oninput="filterTable()" />
@@ -461,30 +520,43 @@ static string BuildPosHtml(string accessToken) => $$"""
           </table>
         </section>
 
+        <!-- ── Settings ──────────────────────────────────── -->
+        <section class="panel" id="tab-settings" style="display:none">
+          <h2>Settings</h2>
+          <div class="settings-form">
+            <div class="form-row"><label>Store Name</label><input id="s-name" /></div>
+            <div class="form-row"><label>Address</label><input id="s-address" /></div>
+            <div class="form-row"><label>Currency Symbol</label><input id="s-currency" style="max-width:80px" /></div>
+            <div class="form-row"><label>Tax Rate (%)</label><input id="s-tax" type="number" step="0.1" min="0" style="max-width:120px" /></div>
+            <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
+          </div>
+        </section>
+
+        <!-- ── Order panel ────────────────────────────────── -->
         <aside class="order-panel">
           <h3>Current Order</h3>
-          <div class="order-item"><span>Butter Croissant</span><span class="qty">×2</span><span>$7.00</span></div>
-          <div class="order-item"><span>Glazed Donut</span><span class="qty">×3</span><span>$6.75</span></div>
-          <div class="order-item"><span>Pain au Chocolat</span><span class="qty">×1</span><span>$4.00</span></div>
-          <div class="total-row"><span>Total</span><span>$17.75</span></div>
+          <div id="order-items"><p class="order-empty">No items yet.<br/>Tap a product to add.</p></div>
+          <div class="order-footer">
+            <div class="tax-row"><span>Subtotal</span><span id="order-subtotal">$0.00</span></div>
+            <div class="tax-row"><span id="tax-label">Tax (8%)</span><span id="order-tax">$0.00</span></div>
+            <div class="total-row"><span>Total</span><span id="order-total">$0.00</span></div>
+            <button class="checkout-btn" id="checkout-btn" onclick="checkout()" disabled>Checkout</button>
+            <button class="clear-btn" onclick="clearOrder()">Clear Order</button>
+          </div>
         </aside>
       </main>
 
-      <footer>Sweet Sales POS v2.1 — Bakery Edition &nbsp;|&nbsp; © 2026 Crumb & Co.</footer>
+      <footer id="footer-bar">Sweet Sales POS v2.1 — Bakery Edition &nbsp;|&nbsp; © 2026 Crumb &amp; Co.</footer>
 
+      <!-- Inventory add/edit modal -->
       <div class="modal-bg" id="modal-bg">
         <div class="modal">
           <h3 id="modal-title">Add Item</h3>
           <input type="hidden" id="edit-id" />
           <div class="form-row"><label>Name</label><input id="f-name" /></div>
-          <div class="form-row"><label>Category</label>
-            <select id="f-cat">
-              <option>Pastries</option><option>Cakes</option><option>Cookies</option>
-              <option>Breads</option><option>Cupcakes</option><option>Pies</option><option>Drinks</option>
-            </select>
-          </div>
+          <div class="form-row"><label>Category</label><select id="f-cat"></select></div>
           <div class="form-row"><label>Emoji</label><input id="f-emoji" placeholder="🥐" /></div>
-          <div class="form-row"><label>Price ($)</label><input id="f-price" type="number" step="0.01" min="0" /></div>
+          <div class="form-row"><label>Price</label><input id="f-price" type="number" step="0.01" min="0" /></div>
           <div class="form-row"><label>Stock</label><input id="f-stock" type="number" min="0" /></div>
           <div class="modal-actions">
             <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
@@ -493,58 +565,243 @@ static string BuildPosHtml(string accessToken) => $$"""
         </div>
       </div>
 
+      <!-- Checkout confirmation modal -->
+      <div class="modal-bg" id="checkout-modal">
+        <div class="modal">
+          <h3>Order Complete</h3>
+          <p id="checkout-summary" style="font-size:.88rem;line-height:1.6;color:#5c2d0a;margin-bottom:20px;"></p>
+          <div class="modal-actions">
+            <button class="btn btn-primary" onclick="closeCheckout()">Done</button>
+          </div>
+        </div>
+      </div>
+
       <div class="toast" id="toast"></div>
 
       <script>
         const TOKEN = '{{accessToken}}';
-        const API   = '/api/inventory';
-        let allItems = [];
 
+        // ── API helpers ────────────────────────────────────────────────────────
         async function apiFetch(url, opts = {}) {
           opts.headers = { ...(opts.headers||{}), Authorization:'Bearer '+TOKEN, 'Content-Type':'application/json' };
           const r = await fetch(url, opts);
-          if (!r.ok) throw new Error(await r.text());
+          if (!r.ok) { const t = await r.text(); throw new Error(t||r.statusText); }
           if (r.status === 204) return null;
           return r.json();
         }
 
-        async function loadInventory() {
-          allItems = await apiFetch(API);
-          renderTable(allItems);
+        // ── App state ──────────────────────────────────────────────────────────
+        let allItems   = [];
+        let settings   = { storeName:'Sweet Sales', address:'', currency:'$', taxRate:8 };
+        let order      = {};          // { itemId: qty }
+        let activeTab  = 'dashboard';
+        let activeCat  = 'All';
+
+        // ── Boot ───────────────────────────────────────────────────────────────
+        async function init() {
+          await Promise.all([loadInventory(), loadSettings()]);
+          renderSidebar();
+          renderDashboard();
+          renderOrder();
+          applySettings();
+          showToast('Signed in successfully', false, 3000);
         }
 
+        // ── Settings ───────────────────────────────────────────────────────────
+        async function loadSettings() {
+          try { settings = await apiFetch('/api/settings'); }
+          catch(e) { /* use defaults */ }
+        }
+
+        async function saveSettings() {
+          settings.storeName = document.getElementById('s-name').value.trim()     || settings.storeName;
+          settings.address   = document.getElementById('s-address').value.trim();
+          settings.currency  = document.getElementById('s-currency').value.trim() || '$';
+          settings.taxRate   = parseFloat(document.getElementById('s-tax').value) || 0;
+          try {
+            settings = await apiFetch('/api/settings', { method:'PUT', body:JSON.stringify(settings) });
+            applySettings();
+            renderOrder();
+            showToast('Settings saved');
+          } catch(e) { showToast('Save failed: '+e.message, true); }
+        }
+
+        function applySettings() {
+          document.getElementById('brand-name').innerHTML = '<span>🥐</span> ' + settings.storeName;
+          document.getElementById('footer-bar').innerHTML =
+            settings.storeName + ' POS v2.1' + (settings.address ? ' — '+settings.address : '') + ' &nbsp;|&nbsp; © 2026';
+          document.getElementById('tax-label').textContent = 'Tax (' + settings.taxRate + '%)';
+          // populate settings form
+          document.getElementById('s-name').value     = settings.storeName;
+          document.getElementById('s-address').value  = settings.address;
+          document.getElementById('s-currency').value = settings.currency;
+          document.getElementById('s-tax').value      = settings.taxRate;
+        }
+
+        // ── Inventory ──────────────────────────────────────────────────────────
+        async function loadInventory() {
+          allItems = await apiFetch('/api/inventory');
+        }
+
+        function renderSidebar() {
+          const cats = ['All', ...new Set(allItems.map(i => i.category))];
+          document.getElementById('cat-list').innerHTML = cats.map(c => `
+            <div class="cat-item${c===activeCat?' active':''}" onclick="selectCat('${c}',this)">
+              <span class="emoji">${catEmoji(c)}</span> ${c}
+            </div>`).join('');
+        }
+
+        function catEmoji(c) {
+          return {All:'🛒',Pastries:'🥐',Cakes:'🎂',Cookies:'🍪',Breads:'🥖',
+                  Cupcakes:'🧁',Pies:'🥧',Drinks:'☕'}[c] ?? '📦';
+        }
+
+        function selectCat(cat, el) {
+          activeCat = cat;
+          document.querySelectorAll('.cat-item').forEach(e => e.classList.remove('active'));
+          el.classList.add('active');
+          if (activeTab === 'dashboard') renderDashboard();
+        }
+
+        function renderDashboard() {
+          const items = activeCat==='All' ? allItems : allItems.filter(i => i.category===activeCat);
+          document.getElementById('dash-heading').textContent =
+            (activeCat==='All' ? 'All Items' : activeCat) + ' — Today\'s Selection';
+          document.getElementById('product-grid').innerHTML = items.map(i => `
+            <div class="product-card${i.stock===0?' out-card':''}" onclick="${i.stock>0?`addToOrder(${i.id})`:''}">
+              ${i.stock===0?'<span class="badge">Out</span>':''}
+              <span class="big-emoji">${i.emoji}</span>
+              <div class="name">${i.name}</div>
+              <div class="price">${settings.currency}${i.price.toFixed(2)}</div>
+            </div>`).join('');
+        }
+
+        // ── Order ──────────────────────────────────────────────────────────────
+        function addToOrder(id) {
+          order[id] = (order[id]||0) + 1;
+          renderOrder();
+        }
+
+        function changeQty(id, delta) {
+          order[id] = (order[id]||0) + delta;
+          if (order[id] <= 0) delete order[id];
+          renderOrder();
+        }
+
+        function clearOrder() { order = {}; renderOrder(); }
+
+        function renderOrder() {
+          const ids = Object.keys(order);
+          if (ids.length === 0) {
+            document.getElementById('order-items').innerHTML =
+              '<p class="order-empty">No items yet.<br/>Tap a product to add.</p>';
+          } else {
+            document.getElementById('order-items').innerHTML = ids.map(id => {
+              const item = allItems.find(i => i.id == id);
+              if (!item) return '';
+              const lineTotal = item.price * order[id];
+              return `<div class="order-item">
+                <span class="order-item-name">${item.emoji} ${item.name}</span>
+                <span class="qty-controls">
+                  <button class="qty-btn" onclick="changeQty(${id},-1)">−</button>
+                  <span class="qty-num">${order[id]}</span>
+                  <button class="qty-btn" onclick="changeQty(${id},+1)">+</button>
+                </span>
+                <span class="order-item-price">${settings.currency}${lineTotal.toFixed(2)}</span>
+              </div>`;
+            }).join('');
+          }
+          const subtotal = Object.keys(order).reduce((s,id) => {
+            const item = allItems.find(i => i.id == id);
+            return s + (item ? item.price * order[id] : 0);
+          }, 0);
+          const tax   = subtotal * (settings.taxRate / 100);
+          const total = subtotal + tax;
+          document.getElementById('order-subtotal').textContent = settings.currency + subtotal.toFixed(2);
+          document.getElementById('order-tax').textContent      = settings.currency + tax.toFixed(2);
+          document.getElementById('order-total').textContent    = settings.currency + total.toFixed(2);
+          document.getElementById('checkout-btn').disabled      = Object.keys(order).length === 0;
+        }
+
+        function checkout() {
+          const subtotal = Object.keys(order).reduce((s,id) => {
+            const item = allItems.find(i => i.id == id);
+            return s + (item ? item.price * order[id] : 0);
+          }, 0);
+          const tax   = subtotal * (settings.taxRate / 100);
+          const total = subtotal + tax;
+          const lines = Object.keys(order).map(id => {
+            const item = allItems.find(i => i.id == id);
+            return item ? `${item.emoji} ${item.name} ×${order[id]} — ${settings.currency}${(item.price*order[id]).toFixed(2)}` : '';
+          }).filter(Boolean).join('\n');
+          document.getElementById('checkout-summary').innerText =
+            lines + `\n\nSubtotal: ${settings.currency}${subtotal.toFixed(2)}\nTax: ${settings.currency}${tax.toFixed(2)}\nTotal: ${settings.currency}${total.toFixed(2)}`;
+          document.getElementById('checkout-modal').classList.add('open');
+        }
+
+        function closeCheckout() {
+          document.getElementById('checkout-modal').classList.remove('open');
+          clearOrder();
+        }
+
+        // ── Reports ────────────────────────────────────────────────────────────
+        function renderReports() {
+          const cur = settings.currency;
+          document.getElementById('rpt-total-items').textContent = allItems.length;
+          document.getElementById('rpt-total-stock').textContent = allItems.reduce((s,i)=>s+i.stock,0);
+          document.getElementById('rpt-low-stock').textContent   = allItems.filter(i=>i.stock>0&&i.stock<5).length;
+          document.getElementById('rpt-out-stock').textContent   = allItems.filter(i=>i.stock===0).length;
+          const avg = allItems.length ? allItems.reduce((s,i)=>s+i.price,0)/allItems.length : 0;
+          document.getElementById('rpt-avg-price').textContent   = cur + avg.toFixed(2);
+          const val = allItems.reduce((s,i)=>s+i.price*i.stock,0);
+          document.getElementById('rpt-inv-value').textContent   = cur + val.toFixed(2);
+
+          const cats = [...new Set(allItems.map(i=>i.category))];
+          const maxStock = Math.max(...cats.map(c=>allItems.filter(i=>i.category===c).reduce((s,i)=>s+i.stock,0)),1);
+          document.getElementById('rpt-cat-bars').innerHTML = cats.map(c => {
+            const stock = allItems.filter(i=>i.category===c).reduce((s,i)=>s+i.stock,0);
+            const pct   = Math.round(stock/maxStock*100);
+            return `<div class="cat-bar">
+              <span>${catEmoji(c)} ${c}</span>
+              <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+              <span style="text-align:right">${stock}</span>
+            </div>`;
+          }).join('');
+        }
+
+        // ── Inventory CRUD ─────────────────────────────────────────────────────
         function renderTable(items) {
           document.getElementById('inv-tbody').innerHTML = items.map(i => `
             <tr>
               <td>${i.emoji} ${i.name}</td>
               <td>${i.category}</td>
-              <td>$${i.price.toFixed(2)}</td>
+              <td>${settings.currency}${i.price.toFixed(2)}</td>
               <td><span class="stock-badge ${i.stock===0?'stock-out':i.stock<5?'stock-low':'stock-ok'}">${i.stock}</span></td>
               <td class="actions">
-                <button class="btn btn-ghost" onclick='openEditModal(${JSON.stringify(i)})'>Edit</button>
-                <button class="btn btn-danger" onclick="deleteItem(${i.id})">Delete</button>
+                <button class="btn btn-ghost btn-sm" onclick='openEditModal(${JSON.stringify(i)})'>Edit</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteItem(${i.id})">Delete</button>
               </td>
             </tr>`).join('');
         }
 
         function filterTable() {
           const q = document.getElementById('search').value.toLowerCase();
-          renderTable(allItems.filter(i => i.name.toLowerCase().includes(q) || i.category.toLowerCase().includes(q)));
+          renderTable(allItems.filter(i =>
+            i.name.toLowerCase().includes(q) || i.category.toLowerCase().includes(q)));
         }
 
-        function showTab(tab, btn) {
-          document.getElementById('pastries-view').style.display = tab==='pastries' ? '' : 'none';
-          document.getElementById('inv-view').style.display      = tab==='inventory' ? '' : 'none';
-          document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
-          btn.classList.add('active');
-          if (tab === 'inventory') loadInventory();
+        function buildCatOptions(selected) {
+          const cats = [...new Set(allItems.map(i=>i.category))];
+          if (!cats.includes(selected) && selected) cats.push(selected);
+          document.getElementById('f-cat').innerHTML =
+            cats.map(c=>`<option${c===selected?' selected':''}>${c}</option>`).join('');
         }
 
         function openAddModal() {
           document.getElementById('modal-title').textContent = 'Add Item';
           document.getElementById('edit-id').value = '';
           ['name','emoji','price','stock'].forEach(f => document.getElementById('f-'+f).value = '');
-          document.getElementById('f-cat').value = 'Pastries';
+          buildCatOptions('Pastries');
           document.getElementById('modal-bg').classList.add('open');
         }
 
@@ -552,10 +809,10 @@ static string BuildPosHtml(string accessToken) => $$"""
           document.getElementById('modal-title').textContent = 'Edit Item';
           document.getElementById('edit-id').value  = item.id;
           document.getElementById('f-name').value   = item.name;
-          document.getElementById('f-cat').value    = item.category;
           document.getElementById('f-emoji').value  = item.emoji;
           document.getElementById('f-price').value  = item.price;
           document.getElementById('f-stock').value  = item.stock;
+          buildCatOptions(item.category);
           document.getElementById('modal-bg').classList.add('open');
         }
 
@@ -571,31 +828,51 @@ static string BuildPosHtml(string accessToken) => $$"""
             stock:    parseInt(document.getElementById('f-stock').value),
           });
           try {
-            if (id) await apiFetch(`${API}/${id}`, { method:'PUT', body });
-            else    await apiFetch(API, { method:'POST', body });
+            if (id) await apiFetch(`/api/inventory/${id}`, { method:'PUT', body });
+            else    await apiFetch('/api/inventory', { method:'POST', body });
             closeModal();
-            showToast(id ? 'Item updated' : 'Item added');
             await loadInventory();
-          } catch(e) { alert('Error: ' + e.message); }
+            renderTable(allItems);
+            renderSidebar();
+            showToast(id ? 'Item updated' : 'Item added');
+          } catch(e) { showToast('Error: '+e.message, true); }
         }
 
         async function deleteItem(id) {
           if (!confirm('Delete this item?')) return;
           try {
-            await apiFetch(`${API}/${id}`, { method:'DELETE' });
-            showToast('Item deleted');
+            await apiFetch(`/api/inventory/${id}`, { method:'DELETE' });
             await loadInventory();
-          } catch(e) { alert('Error: ' + e.message); }
+            renderTable(allItems);
+            renderSidebar();
+            showToast('Item deleted');
+          } catch(e) { showToast('Error: '+e.message, true); }
         }
 
-        function showToast(msg) {
+        // ── Tab navigation ─────────────────────────────────────────────────────
+        const ALL_TABS = ['dashboard','reports','inventory','settings'];
+        function showTab(tab, btn) {
+          ALL_TABS.forEach(t =>
+            document.getElementById('tab-'+t).style.display = t===tab ? '' : 'none');
+          document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          activeTab = tab;
+          if (tab === 'inventory') renderTable(allItems);
+          if (tab === 'reports')   renderReports();
+          if (tab === 'settings')  applySettings();
+        }
+
+        // ── Toast ──────────────────────────────────────────────────────────────
+        function showToast(msg, isError=false, ms=2200) {
           const t = document.getElementById('toast');
           t.textContent = msg;
-          t.classList.add('show');
-          setTimeout(() => t.classList.remove('show'), 2500);
+          t.className   = 'toast show' + (isError ? ' error' : '');
+          clearTimeout(t._timer);
+          t._timer = setTimeout(() => t.classList.remove('show'), ms);
         }
 
         history.replaceState(null, '', '/');
+        init();
       </script>
     </body>
     </html>
