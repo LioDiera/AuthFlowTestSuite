@@ -19,39 +19,60 @@ After sign-in the console app opens `http://localhost:8400/` in your default bro
   dotnet nuget add source https://api.nuget.org/v3/index.json --name nuget.org
   ```
 
-## 1. Configure the App Registration
+## 1. Configure App Registrations
+
+This solution requires **two separate app registrations** — one for the API that exposes protected scopes, and one for the client that signs users in and requests tokens for the API.
+
+---
 
 ### Entra ID
+
+#### Step A — Register the API (`SweetSalesAPI`)
 
 In the [Azure portal](https://portal.azure.com):
 
 1. Go to **Microsoft Entra ID → App registrations → New registration**
-2. Give it a name, select **Web** as the platform, set the redirect URI to `http://localhost:8400`, and click **Register**
-3. On the **Certificates & secrets** tab, create a new **client secret** and copy its value
-4. On the **API permissions** tab, add a delegated permission from your API (or `User.Read` for a basic test), then grant admin consent
-5. If you created a separate API app registration (for `SweetSalesAPI`):
-   - Register it too, then **Expose an API → Add a scope** (e.g. `access_as_user`)
-   - Grant your client app permission to that scope
-   - Note the **Application ID URI** — that becomes the base of your `Scopes` value
+2. Name it (e.g. `SweetSalesAPI`) and click **Register** — no redirect URI needed
+3. On the **Expose an API** tab:
+   - Click **Add** next to *Application ID URI* — accept the default `api://<client-id>` and click **Save**
+   - Click **Add a scope**, name it `access_as_user`, set **Who can consent** to *Admins and users*, fill in the display name and description, and click **Add scope**
+4. Note the **Application (client) ID** — this is `YOUR_API_CLIENT_ID`
+
+#### Step B — Register the Client (console app)
+
+1. Go to **App registrations → New registration**
+2. Name it (e.g. `InteractiveAuthWithWebAPI`), select **Web** as the platform, set the redirect URI to `http://localhost:8400`, and click **Register**
+3. On the **Certificates & secrets** tab, click **New client secret**, copy the generated value — this is `YOUR_CLIENT_SECRET`
+4. On the **API permissions** tab:
+   - Click **Add a permission → My APIs** and select `SweetSalesAPI`
+   - Select the `access_as_user` delegated scope and click **Add permissions**
+   - Click **Grant admin consent for \<your tenant\>**
+5. Note the **Application (client) ID** — this is `YOUR_CLIENT_ID`
+6. Note the **Directory (tenant) ID** from the Overview page — this is `YOUR_TENANT_ID`
+
+---
 
 ### ADFS
 
 On your ADFS server (requires ADFS 2019 or later):
 
 1. Open **AD FS Management** and go to **Application Groups → Add Application Group**
-2. Select **Server application accessing a web API** and give it a name
-3. Copy the **Client Identifier** and provide the redirect URI `http://localhost:8400`
-4. On the **Configure Application Credentials** screen, choose **Generate a shared secret** and copy the value
-5. On the **Configure Web API** screen, set the **Identifier** to the resource URI your client will request tokens for
+2. Select **Server application accessing a web API** and give it a name (e.g. `SweetSalesPOS`)
+3. On the **Server application** screen:
+   - Copy the generated **Client Identifier** — this is `YOUR_CLIENT_ID`
+   - Add the redirect URI `http://localhost:8400`
+4. On the **Configure Application Credentials** screen, choose **Generate a shared secret** and copy the value — this is `YOUR_CLIENT_SECRET`
+5. On the **Configure Web API** screen:
+   - Set the **Identifier** to a URI for your API (e.g. `https://sweetsalesapi.contoso.com/`) — this becomes `YOUR_API_RESOURCE_URI` and the base of your `Scopes` value
 6. On the **Apply Access Control Policy** screen, choose an appropriate policy (e.g. **Permit everyone**)
-7. On the **Configure Application Permissions** screen, ensure the server app is permitted to request the required scopes
+7. On the **Configure Application Permissions** screen, ensure the server app is permitted to request the scopes your API needs (e.g. `openid`, `profile`, `allatclaims`)
 8. Click **Next** and **Close** to finish
 
 ## 2. Configure appsettings.json
 
 ### Console app — `InteractiveAuthWithWebAPI/appsettings.json`
 
-Open this file and fill in the values for the provider(s) you want to use. Leave the other section as-is — the app will ignore any unconfigured provider.
+Open this file and fill in the values for the provider(s) you want to use. Leave the other section with its placeholder values — the app will ignore any unconfigured provider.
 
 **Entra ID**
 ```json
@@ -68,10 +89,10 @@ Open this file and fill in the values for the provider(s) you want to use. Leave
 
 | Value | Where to find it |
 |---|---|
-| `TenantId` | Entra ID → Overview → **Directory (tenant) ID** |
-| `ClientId` | App registration → Overview → **Application (client) ID** |
-| `ClientSecret` | App registration → Certificates & secrets |
-| `Scopes` | API app registration → Expose an API → full scope URI |
+| `TenantId` | Client app registration → Overview → **Directory (tenant) ID** |
+| `ClientId` | Client app registration → Overview → **Application (client) ID** |
+| `ClientSecret` | Client app registration → Certificates & secrets |
+| `Scopes` | API app registration → Expose an API → copy the full scope URI (e.g. `api://<api-client-id>/access_as_user`) |
 
 > `UsePkce: true` enables PKCE on top of the confidential client flow. Set to `false` to use a plain authorization code exchange instead.
 
@@ -83,7 +104,7 @@ Open this file and fill in the values for the provider(s) you want to use. Leave
   "ClientSecret": "YOUR_CLIENT_SECRET",
   "RedirectUri": "http://localhost:8400",
   "UsePkce": true,
-  "Scopes": [ "https://your-resource-uri/" ],
+  "Scopes": [ "YOUR_API_RESOURCE_URI" ],
   "ApiBaseUrl": "http://localhost:7001"
 }
 ```
@@ -91,9 +112,9 @@ Open this file and fill in the values for the provider(s) you want to use. Leave
 | Value | Where to find it |
 |---|---|
 | `Authority` | Your ADFS federation service URL |
-| `ClientId` | Application ID registered in ADFS |
+| `ClientId` | Client Identifier from the Application Group registration |
 | `ClientSecret` | Shared secret generated during registration |
-| `Scopes` | Resource URI of the web API registered in ADFS |
+| `Scopes` | The Web API Identifier set in step 5 of the ADFS registration above |
 
 ### API — `InteractiveAuthWithWebAPI/SweetSalesAPI/appsettings.json`
 
@@ -106,10 +127,10 @@ Open this file and fill in the values for the provider(s) you want to use. Leave
 
 | Value | Where to find it |
 |---|---|
-| `Authority` | Entra ID issuer URL — replace `YOUR_TENANT_ID` with your Directory ID |
-| `Audience` | The **Application (client) ID** of the API's app registration |
+| `Authority` | Entra ID token issuer — replace `YOUR_TENANT_ID` with your Directory (tenant) ID |
+| `Audience` | **API** app registration → Overview → **Application (client) ID** |
 
-> For ADFS, change `Authority` to your ADFS metadata endpoint (e.g. `https://adfs.contoso.com/adfs`). Set `Audience` to the resource URI configured in ADFS.
+> For ADFS, set `Authority` to your ADFS federation service URL (e.g. `https://adfs.contoso.com/adfs`) and `Audience` to the Web API Identifier (resource URI) configured in step 5 of the ADFS registration.
 
 ## 3. Run in VS Code
 
