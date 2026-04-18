@@ -122,7 +122,7 @@ Open this file and fill in the values for the provider(s) you want to use. Leave
 ```json
 "Auth": {
   "Authority": "https://login.microsoftonline.com/YOUR_TENANT_ID/v2.0",
-  "Audience": "YOUR_API_CLIENT_ID"
+  "Audience": "api://YOUR_API_CLIENT_ID"
 }
 ```
 
