@@ -198,7 +198,10 @@ async Task<TokenResult?> AcquireTokenConfidential(
     OpenBrowser(authUri.AbsoluteUri);
 
     HttpListenerContext ctx = await listener.GetContextAsync();
-    await RespondWithHtml(ctx, "<html><body><p>Signing in, please wait...</p></body></html>");
+    ctx.Response.StatusCode = 302;
+    ctx.Response.RedirectLocation = "http://localhost:8400/";
+    ctx.Response.ContentLength64 = 0;
+    ctx.Response.Close();
     listener.Stop();
 
     string rawQuery = ctx.Request.Url?.Query?.TrimStart('?') ?? string.Empty;
