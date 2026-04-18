@@ -5,3 +5,4 @@ obj/
 # VS / Rider
 .vs/
 *.user
+InteractiveAuthApp/appsettings.json

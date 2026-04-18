@@ -12,6 +12,7 @@ A collection of .NET 10 console apps for testing OAuth 2.0 / OpenID Connect auth
 | [ROPCApp](ROPCApp/) | Resource Owner Password Credentials | ✅ | ✅ |
 | [ClientCredentialsApp](ClientCredentialsApp/) | Client Credentials (daemon / service) | ✅ | ❌ |
 | [OBOApp](OBOApp/) | On-Behalf-Of | ✅ | ❌ |
+| [InteractiveAuthWithWebAPI](InteractiveAuthWithWebAPI/) | Authorization Code + PKCE → protected Web API call | ✅ | ✅ |
 
 ## Prerequisites
 
