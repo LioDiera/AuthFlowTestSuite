@@ -96,7 +96,7 @@ async Task RunEntraIdFlow(IConfiguration cfg)
     if (result is null) return;
     ShowTokenSummary(result);
     string? endSession = await GetEndSessionEndpoint($"https://login.microsoftonline.com/{tenantId}/v2.0");
-    await ServePosApp(result.AccessToken, apiBaseUrl, endSession);
+    await ServePosApp(result.AccessToken, result.IdToken, apiBaseUrl, endSession);
 }
 
 // ── ADFS flow ─────────────────────────────────────────────────────────────────
@@ -142,7 +142,7 @@ async Task RunAdfsFlow(IConfiguration cfg)
     if (result is null) return;
     ShowTokenSummary(result);
     string? endSession = await GetEndSessionEndpoint(authority);
-    await ServePosApp(result.AccessToken, apiBaseUrl, endSession);
+    await ServePosApp(result.AccessToken, result.IdToken, apiBaseUrl, endSession);
 }
 
 // ── Public client (MSAL handles PKCE) ────────────────────────────────────────
@@ -257,7 +257,7 @@ async Task<TokenResult?> AcquireTokenConfidential(
 }
 
 // ── Serve the POS app and proxy /api/* calls to SweetSalesAPI ─────────────────
-async Task ServePosApp(string accessToken, string apiBaseUrl, string? endSessionEndpoint = null)
+async Task ServePosApp(string accessToken, string? idToken, string apiBaseUrl, string? endSessionEndpoint = null)
 {
     const string listenOn = "http://localhost:8400/";
     using var listener = new HttpListener();
@@ -333,9 +333,18 @@ async Task ServePosApp(string accessToken, string apiBaseUrl, string? endSession
         if (path.Equals("/logout", StringComparison.OrdinalIgnoreCase))
         {
             const string postLogoutUri = "http://localhost:8400/";
-            string dest = !string.IsNullOrEmpty(endSessionEndpoint)
-                ? endSessionEndpoint + "?post_logout_redirect_uri=" + Uri.EscapeDataString(postLogoutUri)
-                : postLogoutUri;
+            string dest;
+            if (!string.IsNullOrEmpty(endSessionEndpoint))
+            {
+                var qs = "?post_logout_redirect_uri=" + Uri.EscapeDataString(postLogoutUri);
+                if (!string.IsNullOrEmpty(idToken))
+                    qs += "&id_token_hint=" + Uri.EscapeDataString(idToken);
+                dest = endSessionEndpoint + qs;
+            }
+            else
+            {
+                dest = postLogoutUri;
+            }
             ctx.Response.StatusCode = 302;
             ctx.Response.RedirectLocation = dest;
             ctx.Response.ContentLength64 = 0;
