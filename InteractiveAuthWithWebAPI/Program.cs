@@ -76,14 +76,77 @@ async Task RunEntraIdFlow(IConfiguration cfg)
     Console.WriteLine("══ Entra ID ══════════════════════════════════════════════");
     Console.ResetColor();
 
+    string tokenEndpoint = $"https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token";
+    string bootstrapToken = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
+    string spaTarget = "http://localhost:8400/?init=" + bootstrapToken;
+
     TokenResult? result;
+    Func<Task<(Uri authUri, string state, Func<string, Task<TokenResult?>> exchange)>>? buildNewSignIn = null;
+
     if (IsConfigured(clientSecret))
     {
-        string tokenEndpoint = $"https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token";
         var builder = ConfidentialClientApplicationBuilder
             .Create(clientId).WithAuthority(AzureCloudInstance.AzurePublic, tenantId)
             .WithClientSecret(clientSecret!);
-        result = await AcquireTokenConfidential(builder, scopes, tokenEndpoint, clientId, clientSecret!, redirectUri, usePkce);
+        result = await AcquireTokenConfidential(builder, scopes, tokenEndpoint, clientId, clientSecret!, redirectUri, usePkce, spaTarget);
+
+        buildNewSignIn = async () =>
+        {
+            string state = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+            string? cv = null;
+            var pkceParams = new Dictionary<string, (string, bool)> { ["state"] = (state, false) };
+            if (usePkce)
+            {
+                cv = GeneratePkceVerifier();
+                pkceParams["code_challenge"]        = (GeneratePkceChallenge(cv), false);
+                pkceParams["code_challenge_method"] = ("S256", false);
+            }
+            var reApp = ConfidentialClientApplicationBuilder
+                .Create(clientId).WithAuthority(AzureCloudInstance.AzurePublic, tenantId)
+                .WithClientSecret(clientSecret!).WithRedirectUri("http://localhost:8400/").Build();
+            Uri authUri = await reApp.GetAuthorizationRequestUrl(scopes)
+                .WithRedirectUri("http://localhost:8400/")
+                .WithExtraQueryParameters(pkceParams).ExecuteAsync();
+
+            async Task<TokenResult?> Exchange(string code)
+            {
+                if (usePkce && cv is not null)
+                {
+                    var body = new Dictionary<string, string>
+                    {
+                        ["grant_type"]    = "authorization_code",
+                        ["client_id"]     = clientId,
+                        ["client_secret"] = clientSecret!,
+                        ["code"]          = code,
+                        ["redirect_uri"]  = "http://localhost:8400/",
+                        ["code_verifier"] = cv,
+                        ["scope"]         = string.Join(" ", scopes),
+                    };
+                    using var http = new HttpClient();
+                    HttpResponseMessage resp = await http.PostAsync(tokenEndpoint, new FormUrlEncodedContent(body));
+                    string json = await resp.Content.ReadAsStringAsync();
+                    if (!resp.IsSuccessStatusCode) { Console.ForegroundColor = ConsoleColor.Red; Console.WriteLine($"Re-login token exchange failed: {json}"); Console.ResetColor(); return null; }
+                    using JsonDocument doc = JsonDocument.Parse(json);
+                    JsonElement root = doc.RootElement;
+                    string at   = root.GetProperty("access_token").GetString()!;
+                    string? idt = root.TryGetProperty("id_token", out JsonElement ie) ? ie.GetString() : null;
+                    int exp     = root.TryGetProperty("expires_in", out JsonElement ee) ? ee.GetInt32() : 3600;
+                    string[] sc = root.TryGetProperty("scope", out JsonElement se)
+                        ? se.GetString()!.Split(' ', StringSplitOptions.RemoveEmptyEntries) : scopes;
+                    return new TokenResult(at, idt, DateTimeOffset.UtcNow.AddSeconds(exp), sc, ExtractUpnFromJwt(idt ?? at));
+                }
+                else
+                {
+                    try
+                    {
+                        var r = await reApp.AcquireTokenByAuthorizationCode(scopes, code).ExecuteAsync();
+                        return new TokenResult(r.AccessToken, r.IdToken, r.ExpiresOn, r.Scopes.ToArray(), r.Account.Username);
+                    }
+                    catch (MsalServiceException ex) { Console.ForegroundColor = ConsoleColor.Red; Console.WriteLine($"Re-login failed: {ex.Message}"); Console.ResetColor(); return null; }
+                }
+            }
+            return (authUri, state, Exchange);
+        };
     }
     else
     {
@@ -96,7 +159,8 @@ async Task RunEntraIdFlow(IConfiguration cfg)
     if (result is null) return;
     ShowTokenSummary(result);
     string? endSession = await GetEndSessionEndpoint($"https://login.microsoftonline.com/{tenantId}/v2.0");
-    await ServePosApp(result.AccessToken, result.IdToken, apiBaseUrl, endSession);
+    if (!IsConfigured(clientSecret)) OpenBrowser(spaTarget);
+    await ServePosApp(result.AccessToken, result.IdToken, apiBaseUrl, endSession, bootstrapToken, buildNewSignIn);
 }
 
 // ── ADFS flow ─────────────────────────────────────────────────────────────────
@@ -116,7 +180,13 @@ async Task RunAdfsFlow(IConfiguration cfg)
     Console.WriteLine("══ ADFS ══════════════════════════════════════════════════");
     Console.ResetColor();
 
+    string tokenEndpoint = authority.TrimEnd('/') + "/oauth2/token";
+    string bootstrapToken = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
+    string spaTarget = "http://localhost:8400/?init=" + bootstrapToken;
+
     TokenResult? result;
+    Func<Task<(Uri authUri, string state, Func<string, Task<TokenResult?>> exchange)>>? buildNewSignIn = null;
+
     if (IsConfigured(clientSecret))
     {
         if (!IsConfigured(redirectUri))
@@ -126,10 +196,67 @@ async Task RunAdfsFlow(IConfiguration cfg)
             Console.ResetColor();
             return;
         }
-        string tokenEndpoint = authority.TrimEnd('/') + "/oauth2/token";
         var builder = ConfidentialClientApplicationBuilder
             .Create(clientId).WithAdfsAuthority(authority).WithClientSecret(clientSecret!);
-        result = await AcquireTokenConfidential(builder, scopes, tokenEndpoint, clientId, clientSecret!, redirectUri!, usePkce);
+        result = await AcquireTokenConfidential(builder, scopes, tokenEndpoint, clientId, clientSecret!, redirectUri!, usePkce, spaTarget);
+
+        buildNewSignIn = async () =>
+        {
+            string state = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+            string? cv = null;
+            var pkceParams = new Dictionary<string, (string, bool)> { ["state"] = (state, false) };
+            if (usePkce)
+            {
+                cv = GeneratePkceVerifier();
+                pkceParams["code_challenge"]        = (GeneratePkceChallenge(cv), false);
+                pkceParams["code_challenge_method"] = ("S256", false);
+            }
+            var reApp = ConfidentialClientApplicationBuilder
+                .Create(clientId).WithAdfsAuthority(authority)
+                .WithClientSecret(clientSecret!).WithRedirectUri("http://localhost:8400/").Build();
+            Uri authUri = await reApp.GetAuthorizationRequestUrl(scopes)
+                .WithRedirectUri("http://localhost:8400/")
+                .WithExtraQueryParameters(pkceParams).ExecuteAsync();
+
+            async Task<TokenResult?> Exchange(string code)
+            {
+                if (usePkce && cv is not null)
+                {
+                    var body = new Dictionary<string, string>
+                    {
+                        ["grant_type"]    = "authorization_code",
+                        ["client_id"]     = clientId,
+                        ["client_secret"] = clientSecret!,
+                        ["code"]          = code,
+                        ["redirect_uri"]  = "http://localhost:8400/",
+                        ["code_verifier"] = cv,
+                        ["scope"]         = string.Join(" ", scopes),
+                    };
+                    using var http = new HttpClient();
+                    HttpResponseMessage resp = await http.PostAsync(tokenEndpoint, new FormUrlEncodedContent(body));
+                    string json = await resp.Content.ReadAsStringAsync();
+                    if (!resp.IsSuccessStatusCode) { Console.ForegroundColor = ConsoleColor.Red; Console.WriteLine($"Re-login token exchange failed: {json}"); Console.ResetColor(); return null; }
+                    using JsonDocument doc = JsonDocument.Parse(json);
+                    JsonElement root = doc.RootElement;
+                    string at   = root.GetProperty("access_token").GetString()!;
+                    string? idt = root.TryGetProperty("id_token", out JsonElement ie) ? ie.GetString() : null;
+                    int exp     = root.TryGetProperty("expires_in", out JsonElement ee) ? ee.GetInt32() : 3600;
+                    string[] sc = root.TryGetProperty("scope", out JsonElement se)
+                        ? se.GetString()!.Split(' ', StringSplitOptions.RemoveEmptyEntries) : scopes;
+                    return new TokenResult(at, idt, DateTimeOffset.UtcNow.AddSeconds(exp), sc, ExtractUpnFromJwt(idt ?? at));
+                }
+                else
+                {
+                    try
+                    {
+                        var r = await reApp.AcquireTokenByAuthorizationCode(scopes, code).ExecuteAsync();
+                        return new TokenResult(r.AccessToken, r.IdToken, r.ExpiresOn, r.Scopes.ToArray(), r.Account.Username);
+                    }
+                    catch (MsalServiceException ex) { Console.ForegroundColor = ConsoleColor.Red; Console.WriteLine($"Re-login failed: {ex.Message}"); Console.ResetColor(); return null; }
+                }
+            }
+            return (authUri, state, Exchange);
+        };
     }
     else
     {
@@ -142,7 +269,8 @@ async Task RunAdfsFlow(IConfiguration cfg)
     if (result is null) return;
     ShowTokenSummary(result);
     string? endSession = await GetEndSessionEndpoint(authority);
-    await ServePosApp(result.AccessToken, result.IdToken, apiBaseUrl, endSession);
+    if (!IsConfigured(clientSecret)) OpenBrowser(spaTarget);
+    await ServePosApp(result.AccessToken, result.IdToken, apiBaseUrl, endSession, bootstrapToken, buildNewSignIn);
 }
 
 // ── Public client (MSAL handles PKCE) ────────────────────────────────────────
@@ -167,7 +295,7 @@ async Task<TokenResult?> AcquireTokenPublic(IPublicClientApplication app, string
 async Task<TokenResult?> AcquireTokenConfidential(
     ConfidentialClientApplicationBuilder appBuilder, string[] scopes,
     string tokenEndpoint, string clientId, string clientSecret,
-    string? fixedRedirectUri = null, bool usePkce = false)
+    string? fixedRedirectUri = null, bool usePkce = false, string? spaTarget = null)
 {
     string redirectUri = IsConfigured(fixedRedirectUri)
         ? fixedRedirectUri!.TrimEnd('/') + "/"
@@ -201,7 +329,7 @@ async Task<TokenResult?> AcquireTokenConfidential(
 
     HttpListenerContext ctx = await listener.GetContextAsync();
     ctx.Response.StatusCode = 302;
-    ctx.Response.RedirectLocation = "http://localhost:8400/";
+    ctx.Response.RedirectLocation = spaTarget ?? "http://localhost:8400/";
     ctx.Response.ContentLength64 = 0;
     ctx.Response.Close();
     listener.Stop();
@@ -257,7 +385,10 @@ async Task<TokenResult?> AcquireTokenConfidential(
 }
 
 // ── Serve the POS app and proxy /api/* calls to SweetSalesAPI ─────────────────
-async Task ServePosApp(string accessToken, string? idToken, string apiBaseUrl, string? endSessionEndpoint = null)
+async Task ServePosApp(
+    string accessToken, string? idToken, string apiBaseUrl, string? endSessionEndpoint,
+    string bootstrapToken,
+    Func<Task<(Uri authUri, string state, Func<string, Task<TokenResult?>> exchange)>>? newSignIn = null)
 {
     const string listenOn = "http://localhost:8400/";
     using var listener = new HttpListener();
@@ -319,10 +450,24 @@ async Task ServePosApp(string accessToken, string? idToken, string apiBaseUrl, s
     Console.WriteLine("Press Ctrl+C to stop.");
 
     using HttpClient apiClient = new();
-    apiClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
 
-    bool signedOut = false;
-    string signedOutHtml = """
+    // ── Session state ─────────────────────────────────────────────────────────
+    // Bootstrap map: one-time init token → tokens (consumed on first use)
+    var bootstrapTokens = new Dictionary<string, (string AccessToken, string? IdToken)>
+        { [bootstrapToken] = (accessToken, idToken) };
+    // Active sessions: sessionId → tokens
+    var sessions = new Dictionary<string, (string AccessToken, string? IdToken)>();
+    // In-flight re-login flows: OIDC state → code-exchange delegate
+    var pendingSignIns = new Dictionary<string, Func<string, Task<TokenResult?>>>();
+    // The token currently forwarded to the API
+    string currentAccessToken = accessToken;
+    string? currentIdToken    = idToken;
+
+    // ── Signed-out page ───────────────────────────────────────────────────────
+    string signInAgainLink = newSignIn is not null
+        ? """<a class="signin-btn" href="/login">Sign in again</a>"""
+        : """<p>Close this tab or restart the app to sign in again.</p>""";
+    string signedOutHtml = $$"""
         <!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/>
         <style>
           *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -331,16 +476,47 @@ async Task ServePosApp(string accessToken, string? idToken, string apiBaseUrl, s
                  justify-content: center; height: 100vh; }
           .box { text-align: center; }
           h2 { font-size: 1.4rem; margin-bottom: 10px; color: #7b3f00; }
-          p  { color: #a0714f; font-size: .9rem; }
+          p  { color: #a0714f; font-size: .9rem; margin-bottom: 16px; }
+          .signin-btn { display: inline-block; padding: 9px 22px; background: #7b3f00;
+                        color: #fff; text-decoration: none; border-radius: 8px;
+                        font-weight: 600; font-size: .85rem; }
+          .signin-btn:hover { background: #6a3600; }
         </style>
         </head><body>
           <div class="box">
-            <div style="font-size:2.5rem;margin-bottom:16px">🔒</div>
+            <div style="font-size:2.5rem;margin-bottom:16px">&#128274;</div>
             <h2>You have been signed out.</h2>
-            <p>Close this tab or restart the app to sign in again.</p>
+            {{signInAgainLink}}
           </div>
         </body></html>
         """;
+
+    // ── Cookie helpers ────────────────────────────────────────────────────────
+    static string? GetSessionCookie(HttpListenerContext ctx)
+    {
+        string? hdr = ctx.Request.Headers["Cookie"];
+        if (hdr is null) return null;
+        foreach (string part in hdr.Split(';'))
+        {
+            string[] kv = part.Trim().Split('=', 2);
+            if (kv.Length == 2 && kv[0].Trim() == "session") return kv[1].Trim();
+        }
+        return null;
+    }
+
+    static void SetSessionCookie(HttpListenerContext ctx, string sid)
+        => ctx.Response.Headers.Add("Set-Cookie", $"session={sid}; Path=/; HttpOnly; SameSite=Lax");
+
+    static void ClearSessionCookie(HttpListenerContext ctx)
+        => ctx.Response.Headers.Add("Set-Cookie", "session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+
+    static void SendRedirect(HttpListenerContext ctx, string location)
+    {
+        ctx.Response.StatusCode = 302;
+        ctx.Response.RedirectLocation = location;
+        ctx.Response.ContentLength64 = 0;
+        ctx.Response.Close();
+    }
 
     while (true)
     {
@@ -348,39 +524,137 @@ async Task ServePosApp(string accessToken, string? idToken, string apiBaseUrl, s
         try { ctx = await listener.GetContextAsync(); }
         catch { break; }
 
-        // Once signed out, every request gets the signed-out page
-        if (signedOut)
+        string path     = ctx.Request.Url?.AbsolutePath ?? "/";
+        string rawQuery = ctx.Request.Url?.Query ?? "";
+        var qs = rawQuery.TrimStart('?')
+            .Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .Select(p => p.Split('=', 2)).Where(p => p.Length == 2)
+            .ToDictionary(p => Uri.UnescapeDataString(p[0]), p => Uri.UnescapeDataString(p[1]),
+                          StringComparer.OrdinalIgnoreCase);
+
+        // ── Bootstrap: one-time ?init=<token> → create session + set cookie ──
+        if (qs.TryGetValue("init", out string? initToken) &&
+            bootstrapTokens.TryGetValue(initToken, out var btTokens))
         {
+            bootstrapTokens.Remove(initToken);
+            string newSid = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
+            sessions[newSid] = btTokens;
+            currentAccessToken = btTokens.AccessToken;
+            currentIdToken     = btTokens.IdToken;
+            SetSessionCookie(ctx, newSid);
+            SendRedirect(ctx, "/");
+            continue;
+        }
+
+        // ── Auth callback from re-login: ?code=...&state=... ──────────────────
+        if (qs.TryGetValue("code", out string? authCode) &&
+            qs.TryGetValue("state", out string? cbState) &&
+            pendingSignIns.TryGetValue(cbState, out var exchange))
+        {
+            pendingSignIns.Remove(cbState);
+            TokenResult? reResult = await exchange(authCode);
+            if (reResult is not null)
+            {
+                string newSid = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
+                sessions[newSid] = (reResult.AccessToken, reResult.IdToken);
+                currentAccessToken = reResult.AccessToken;
+                currentIdToken     = reResult.IdToken;
+                ShowTokenSummary(reResult);
+                SetSessionCookie(ctx, newSid);
+                SendRedirect(ctx, "/");
+            }
+            else
+            {
+                await RespondWithHtml(ctx, signedOutHtml);
+            }
+            continue;
+        }
+
+        // ── Auth error callback ───────────────────────────────────────────────
+        if (qs.ContainsKey("error") && qs.TryGetValue("state", out string? errState))
+        {
+            pendingSignIns.Remove(errState);
+            string errDesc = qs.TryGetValue("error_description", out string? d) ? d : qs["error"];
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"Sign-in error: {errDesc}");
+            Console.ResetColor();
             await RespondWithHtml(ctx, signedOutHtml);
             continue;
         }
 
-        string path = ctx.Request.Url?.AbsolutePath ?? "/";
+        // ── Post-IdP-logout: ?signed_out=1 ───────────────────────────────────
+        if (rawQuery.Contains("signed_out=1"))
+        {
+            string? expiredSid = GetSessionCookie(ctx);
+            if (expiredSid is not null) sessions.Remove(expiredSid);
+            ClearSessionCookie(ctx);
+            await RespondWithHtml(ctx, signedOutHtml);
+            continue;
+        }
 
-        // Sign-out: redirect browser to IdP end_session endpoint, keep app running
+        // Remaining routes require a valid session cookie
+        string? sessionId  = GetSessionCookie(ctx);
+        bool    hasSession = sessionId is not null && sessions.ContainsKey(sessionId);
+
+        // ── Logout → drop session + cookie, redirect to IdP ──────────────────
         if (path.Equals("/logout", StringComparison.OrdinalIgnoreCase))
         {
+            if (sessionId is not null) sessions.Remove(sessionId);
+            ClearSessionCookie(ctx);
             const string postLogoutUri = "http://localhost:8400/?signed_out=1";
             string dest;
             if (!string.IsNullOrEmpty(endSessionEndpoint))
             {
-                var qs = "?post_logout_redirect_uri=" + Uri.EscapeDataString(postLogoutUri);
-                if (!string.IsNullOrEmpty(idToken))
-                    qs += "&id_token_hint=" + Uri.EscapeDataString(idToken);
-                dest = endSessionEndpoint + qs;
+                string logoutQs = "?post_logout_redirect_uri=" + Uri.EscapeDataString(postLogoutUri);
+                if (!string.IsNullOrEmpty(currentIdToken))
+                    logoutQs += "&id_token_hint=" + Uri.EscapeDataString(currentIdToken);
+                dest = endSessionEndpoint + logoutQs;
             }
             else
             {
                 dest = postLogoutUri;
             }
-            ctx.Response.StatusCode = 302;
-            ctx.Response.RedirectLocation = dest;
-            ctx.Response.ContentLength64 = 0;
-            ctx.Response.Close();
-            continue; // keep listener running
+            SendRedirect(ctx, dest);
+            continue;
         }
 
-        // Proxy /api/* → SweetSalesAPI
+        // ── Initiate new sign-in ──────────────────────────────────────────────
+        if (path.Equals("/login", StringComparison.OrdinalIgnoreCase))
+        {
+            if (newSignIn is not null)
+            {
+                try
+                {
+                    var (authUri, newState, newExchange) = await newSignIn();
+                    pendingSignIns[newState] = newExchange;
+                    SendRedirect(ctx, authUri.AbsoluteUri);
+                }
+                catch (Exception ex)
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine($"Failed to build sign-in URL: {ex.Message}");
+                    Console.ResetColor();
+                    await RespondWithHtml(ctx, signedOutHtml);
+                }
+            }
+            else
+            {
+                await RespondWithHtml(ctx, signedOutHtml);
+            }
+            continue;
+        }
+
+        // ── No valid session → redirect to /login (or show signed-out page) ──
+        if (!hasSession)
+        {
+            if (newSignIn is not null)
+                SendRedirect(ctx, "/login");
+            else
+                await RespondWithHtml(ctx, signedOutHtml);
+            continue;
+        }
+
+        // ── Proxy /api/* → SweetSalesAPI ─────────────────────────────────────
         if (path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase))
         {
             string targetUrl = apiBaseUrl.TrimEnd('/') + path;
@@ -388,6 +662,7 @@ async Task ServePosApp(string accessToken, string? idToken, string apiBaseUrl, s
                 targetUrl += ctx.Request.Url.Query;
 
             HttpRequestMessage req = new(new HttpMethod(ctx.Request.HttpMethod), targetUrl);
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", currentAccessToken);
             if (ctx.Request.HasEntityBody)
             {
                 using var reader = new System.IO.StreamReader(ctx.Request.InputStream);
@@ -407,17 +682,8 @@ async Task ServePosApp(string accessToken, string? idToken, string apiBaseUrl, s
             continue;
         }
 
-        // Post-logout redirect from IdP — set flag and serve signed-out page
-        string? rawQuery = ctx.Request.Url?.Query;
-        if (rawQuery is not null && rawQuery.Contains("signed_out=1"))
-        {
-            signedOut = true;
-            await RespondWithHtml(ctx, signedOutHtml);
-            continue;
-        }
-
-        // Serve POS SPA
-        await RespondWithHtml(ctx, BuildPosHtml(accessToken));
+        // ── Serve POS SPA ─────────────────────────────────────────────────────
+        await RespondWithHtml(ctx, BuildPosHtml(currentAccessToken));
     }
 }
 
