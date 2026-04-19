@@ -58,13 +58,13 @@ In the [Azure portal](https://portal.azure.com):
 On your ADFS server (requires ADFS 2019 or later):
 
 1. Open **AD FS Management** and go to **Application Groups → Add Application Group**
-2. Select **Server application accessing a web API** and give it a name (e.g. `SweetSalesPOS`)
+2. Select **Server application accessing a web API** and give it a name (e.g. `InteractiveAuthWithWebAPI`)
 3. On the **Server application** screen:
    - Copy the generated **Client Identifier** — this is `YOUR_CLIENT_ID`
    - Add the redirect URI `http://localhost:8400`
 4. On the **Configure Application Credentials** screen, choose **Generate a shared secret** and copy the value — this is `YOUR_CLIENT_SECRET`
 5. On the **Configure Web API** screen:
-   - Set the **Identifier** to a URI for your API (e.g. `https://sweetsalesapi.contoso.com/`) — this becomes `YOUR_API_RESOURCE_URI` and the base of your `Scopes` value
+   - Set the **Identifier** to a URI for your API (e.g. `https://sweetsalesapi/`) — this becomes `YOUR_API_RESOURCE_URI` and the base of your `Scopes` value
 6. On the **Apply Access Control Policy** screen, choose an appropriate policy (e.g. **Permit everyone**)
 7. On the **Configure Application Permissions** screen, ensure the server app is permitted to request the scopes your API needs (e.g. `openid`, `profile`, `allatclaims`)
 8. Click **Next** and **Close** to finish
