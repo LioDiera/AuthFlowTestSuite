@@ -119,7 +119,7 @@ Open this file and fill in the values for the provider(s) you want to use. Leave
 
 > **ADFS logout redirect**: ADFS requires the `LogoutUri` to be registered via PowerShell before `post_logout_redirect_uri` will be honoured. Run this on the ADFS server (replace the identifier with your client's):
 > ```powershell
-> Set-AdfsServerApplication -TargetIdentifier <YOUR_CLIENT_ID> -LogoutUri http://localhost:8400/
+ > Set-AdfsServerApplication -TargetIdentifier <YOUR_CLIENT_ID> -LogoutUri http://localhost:8400/?signed_out=1
 > ```
 > Reference: [AD FS OpenID Connect Logout](https://learn.microsoft.com/en-us/windows-server/identity/ad-fs/development/ad-fs-logout-openid-connect)
 

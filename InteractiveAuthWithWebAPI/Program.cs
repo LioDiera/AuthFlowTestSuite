@@ -332,7 +332,7 @@ async Task ServePosApp(string accessToken, string? idToken, string apiBaseUrl, s
         // Sign-out: redirect browser to IdP end_session endpoint, keep app running
         if (path.Equals("/logout", StringComparison.OrdinalIgnoreCase))
         {
-            const string postLogoutUri = "http://localhost:8400/";
+            const string postLogoutUri = "http://localhost:8400/?signed_out=1";
             string dest;
             if (!string.IsNullOrEmpty(endSessionEndpoint))
             {
@@ -376,6 +376,32 @@ async Task ServePosApp(string accessToken, string? idToken, string apiBaseUrl, s
             ctx.Response.ContentLength64 = apiBytes.Length;
             await ctx.Response.OutputStream.WriteAsync(apiBytes);
             ctx.Response.Close();
+            continue;
+        }
+
+        // Post-logout redirect from IdP — serve signed-out page
+        string? rawQuery = ctx.Request.Url?.Query;
+        if (rawQuery is not null && rawQuery.Contains("signed_out=1"))
+        {
+            await RespondWithHtml(ctx, """
+                <!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/>
+                <style>
+                  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+                  body { font-family: "Segoe UI", system-ui, sans-serif; background: #fdf6ee;
+                         color: #2c1a0e; display: flex; align-items: center;
+                         justify-content: center; height: 100vh; }
+                  .box { text-align: center; }
+                  h2 { font-size: 1.4rem; margin-bottom: 10px; color: #7b3f00; }
+                  p  { color: #a0714f; font-size: .9rem; }
+                </style>
+                </head><body>
+                  <div class="box">
+                    <div style="font-size:2.5rem;margin-bottom:16px">🔒</div>
+                    <h2>You have been signed out.</h2>
+                    <p>Close this tab or restart the app to sign in again.</p>
+                  </div>
+                </body></html>
+                """);
             continue;
         }
 
