@@ -3,15 +3,20 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace SweetSalesAPI.Controllers;
 
+// Records used as the API's data model.
+// InventoryItem is returned by GET endpoints (includes the server-assigned Id).
+// UpsertInventoryItem is accepted by POST and PUT (Id comes from the route, not the body).
 public record InventoryItem(int Id, string Name, string Category, string Emoji, decimal Price, int Stock);
 public record UpsertInventoryItem(string Name, string Category, string Emoji, decimal Price, int Stock);
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize] // Every endpoint requires a valid JWT — validated by the MultiIssuer policy scheme
 public class InventoryController : ControllerBase
 {
-    // In-memory store — seeded with the same items shown in the POS page
+    // In-memory store — seeded with the same items shown in the POS page.
+    // static so the same list is shared across all requests for the lifetime of the process.
+    // A real implementation would use a database; this keeps the demo self-contained.
     private static readonly List<InventoryItem> _items =
     [
         new(1,  "Butter Croissant",  "Pastries", "🥐", 3.50m,  24),
@@ -32,7 +37,7 @@ public class InventoryController : ControllerBase
 
     private static int _nextId = 15;
 
-    // GET api/inventory
+    // GET api/inventory — returns the full list, used by the SPA on load and after mutations
     [HttpGet]
     public ActionResult<IEnumerable<InventoryItem>> GetAll() => Ok(_items);
 
@@ -44,23 +49,24 @@ public class InventoryController : ControllerBase
         return item is null ? NotFound() : Ok(item);
     }
 
-    // POST api/inventory
+    // POST api/inventory — assigns the next sequential Id and adds to the store
     [HttpPost]
     public ActionResult<InventoryItem> Create([FromBody] UpsertInventoryItem dto)
     {
         var item = new InventoryItem(_nextId++, dto.Name, dto.Category, dto.Emoji, dto.Price, dto.Stock);
         _items.Add(item);
+        // 201 Created with a Location header pointing to the new resource
         return CreatedAtAction(nameof(Get), new { id = item.Id }, item);
     }
 
-    // PUT api/inventory/{id}
+    // PUT api/inventory/{id} — full replacement (no partial PATCH — records are immutable)
     [HttpPut("{id:int}")]
     public IActionResult Update(int id, [FromBody] UpsertInventoryItem dto)
     {
         int idx = _items.FindIndex(i => i.Id == id);
         if (idx < 0) return NotFound();
         _items[idx] = new InventoryItem(id, dto.Name, dto.Category, dto.Emoji, dto.Price, dto.Stock);
-        return NoContent();
+        return NoContent(); // 204 — standard for successful PUT with no response body
     }
 
     // DELETE api/inventory/{id}
@@ -70,6 +76,6 @@ public class InventoryController : ControllerBase
         int idx = _items.FindIndex(i => i.Id == id);
         if (idx < 0) return NotFound();
         _items.RemoveAt(idx);
-        return NoContent();
+        return NoContent(); // 204
     }
 }
