@@ -561,7 +561,7 @@ static string BuildPosHtml(string accessToken)
         </nav>
         {{(string.IsNullOrEmpty(fullName) ? "" : $"""
         <div class="user-pill" id="user-pill" onclick="toggleUserMenu(event)">
-          <span>\ud83d\udc64 {fullName}</span>
+          <span>&#128100; {fullName}</span>
           <div class="user-dropdown" id="user-dropdown">
             <button onclick="signOut()">Sign out</button>
           </div>
