@@ -497,6 +497,9 @@ async Task ServePosApp(
     string? currentIdToken    = idToken;
 
     // ── Signed-out page ───────────────────────────────────────────────────────
+    // Built once before the loop. The "Sign in again" link is only shown when a
+    // buildNewSignIn delegate is available (confidential clients only); for public
+    // clients there is no in-process re-login path so we show a plain text prompt.
     string signInAgainLink = newSignIn is not null
         ? """<a class="signin-btn" href="/login">Sign in again</a>"""
         : """<p>Close this tab or restart the app to sign in again.</p>""";
@@ -525,6 +528,12 @@ async Task ServePosApp(
         """;
 
     // ── Cookie helpers ────────────────────────────────────────────────────────
+    // HttpListener does not have a built-in cookie API with HttpOnly support, so
+    // we read/write the raw Cookie / Set-Cookie headers directly.
+    // HttpOnly prevents JavaScript from reading the cookie (XSS protection).
+    // SameSite=Lax blocks the cookie from being sent on cross-site navigations
+    // (CSRF protection) while still allowing it on same-site requests.
+    // Max-Age=0 on ClearSessionCookie causes the browser to delete it immediately.
     static string? GetSessionCookie(HttpListenerContext ctx)
     {
         string? hdr = ctx.Request.Headers["Cookie"];
@@ -551,6 +560,12 @@ async Task ServePosApp(
         ctx.Response.Close();
     }
 
+    // ── Main request loop ─────────────────────────────────────────────────────
+    // Each iteration awaits one incoming HTTP request. The catch-and-break handles
+    // the ObjectDisposedException thrown when listener.Stop() is called (Ctrl+C).
+    // Route dispatch order matters: unauthenticated callbacks (?init, ?code, ?error,
+    // ?signed_out) are handled before the session gate so they can establish or
+    // clear the session without requiring an existing cookie.
     while (true)
     {
         HttpListenerContext ctx;
@@ -559,6 +574,7 @@ async Task ServePosApp(
 
         string path     = ctx.Request.Url?.AbsolutePath ?? "/";
         string rawQuery = ctx.Request.Url?.Query ?? "";
+        // Parse the query string into a case-insensitive dictionary for easy lookup.
         var qs = rawQuery.TrimStart('?')
             .Split('&', StringSplitOptions.RemoveEmptyEntries)
             .Select(p => p.Split('=', 2)).Where(p => p.Length == 2)
@@ -566,10 +582,15 @@ async Task ServePosApp(
                           StringComparer.OrdinalIgnoreCase);
 
         // ── Bootstrap: one-time ?init=<token> → create session + set cookie ──
+        // The IdP redirected to ?init=<bootstrapToken> after sign-in. We look up
+        // the token in bootstrapTokens (pre-loaded with the initial access/id tokens),
+        // remove it immediately so it can't be replayed, then create a new random
+        // session ID, store the tokens server-side, and set the HttpOnly session cookie.
+        // From this point the browser holds only the opaque session ID, never a token.
         if (qs.TryGetValue("init", out string? initToken) &&
             bootstrapTokens.TryGetValue(initToken, out var btTokens))
         {
-            bootstrapTokens.Remove(initToken);
+            bootstrapTokens.Remove(initToken); // consume — one-time use only
             string newSid = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
             sessions[newSid] = btTokens;
             currentAccessToken = btTokens.AccessToken;
@@ -580,11 +601,17 @@ async Task ServePosApp(
         }
 
         // ── Auth callback from re-login: ?code=...&state=... ──────────────────
+        // After a /login redirect the IdP posts the auth code back here on :8400.
+        // We identify the in-flight flow by matching the OIDC state parameter against
+        // pendingSignIns, remove it (one-time), and call the stored Exchange delegate
+        // to do the back-channel token exchange. On success a new session is created
+        // exactly like the bootstrap path above. On failure the signed-out page is
+        // shown so the user isn't left on a blank page.
         if (qs.TryGetValue("code", out string? authCode) &&
             qs.TryGetValue("state", out string? cbState) &&
             pendingSignIns.TryGetValue(cbState, out var exchange))
         {
-            pendingSignIns.Remove(cbState);
+            pendingSignIns.Remove(cbState); // consume — one-time use only
             TokenResult? reResult = await exchange(authCode);
             if (reResult is not null)
             {
@@ -604,6 +631,10 @@ async Task ServePosApp(
         }
 
         // ── Auth error callback ───────────────────────────────────────────────
+        // The IdP returns ?error=...&state=... when the user cancels or an OAuth
+        // error occurs (e.g. consent_required, access_denied). We clean up the
+        // pending flow keyed by state and show the signed-out page rather than
+        // leaving the listener waiting for a code that will never arrive.
         if (qs.ContainsKey("error") && qs.TryGetValue("state", out string? errState))
         {
             pendingSignIns.Remove(errState);
@@ -616,6 +647,11 @@ async Task ServePosApp(
         }
 
         // ── Post-IdP-logout: ?signed_out=1 ───────────────────────────────────
+        // This is the post_logout_redirect_uri registered in the IdP. The IdP
+        // sends the browser here after completing sign-out on its side. We remove
+        // any remaining local session entry and clear the cookie so the browser
+        // is fully unauthenticated both at the IdP and locally before rendering
+        // the signed-out page. (Session may already be gone if /logout ran first.)
         if (rawQuery.Contains("signed_out=1"))
         {
             string? expiredSid = GetSessionCookie(ctx);
@@ -625,11 +661,21 @@ async Task ServePosApp(
             continue;
         }
 
-        // Remaining routes require a valid session cookie
+        // ── Session gate ──────────────────────────────────────────────────────
+        // All routes below this point require a valid session. We read the cookie
+        // and check it against the in-memory sessions dict. hasSession is false if
+        // the cookie is absent, expired, or was cleared by a prior logout.
         string? sessionId  = GetSessionCookie(ctx);
         bool    hasSession = sessionId is not null && sessions.ContainsKey(sessionId);
 
         // ── Logout → drop session + cookie, redirect to IdP ──────────────────
+        // Triggered by the "Sign out" button in the SPA (window.location = '/logout').
+        // We drop the local session first (server-side), clear the browser cookie,
+        // then redirect to the IdP's end_session_endpoint so the SSO session there
+        // is also terminated. id_token_hint tells the IdP which session to end;
+        // logout_hint skips the account-picker on Entra (see comment inside).
+        // If no end_session_endpoint is known (e.g. ADFS not configured) we fall
+        // back to the local signed-out page directly.
         if (path.Equals("/logout", StringComparison.OrdinalIgnoreCase))
         {
             if (sessionId is not null) sessions.Remove(sessionId);
@@ -657,6 +703,12 @@ async Task ServePosApp(
         }
 
         // ── Initiate new sign-in ──────────────────────────────────────────────
+        // Reached from the "Sign in again" link on the signed-out page, or when an
+        // unauthenticated request is redirected here (see session gate below).
+        // Calls the buildNewSignIn factory to produce a fresh auth URL + PKCE state,
+        // stores the Exchange delegate in pendingSignIns keyed by state, then
+        // redirects the browser to the IdP. The code callback will arrive back
+        // on this same listener via the ?code&state route above.
         if (path.Equals("/login", StringComparison.OrdinalIgnoreCase))
         {
             if (newSignIn is not null)
@@ -683,6 +735,10 @@ async Task ServePosApp(
         }
 
         // ── No valid session → redirect to /login (or show signed-out page) ──
+        // Any request that isn't one of the above routes and has no valid session
+        // cookie lands here. If re-login is available we bounce to /login which
+        // starts a new OIDC flow; otherwise we show the signed-out page (public
+        // client path where no in-process re-login is possible).
         if (!hasSession)
         {
             if (newSignIn is not null)
