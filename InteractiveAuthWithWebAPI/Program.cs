@@ -104,7 +104,8 @@ async Task RunEntraIdFlow(IConfiguration cfg)
             var reApp = ConfidentialClientApplicationBuilder
                 .Create(clientId).WithAuthority(AzureCloudInstance.AzurePublic, tenantId)
                 .WithClientSecret(clientSecret!).WithRedirectUri("http://localhost:8400/").Build();
-            Uri authUri = await reApp.GetAuthorizationRequestUrl(scopes)
+            string[] reScopes = scopes.Concat(new[] { "openid", "profile" }).Distinct().ToArray();
+            Uri authUri = await reApp.GetAuthorizationRequestUrl(reScopes)
                 .WithRedirectUri("http://localhost:8400/")
                 .WithExtraQueryParameters(pkceParams).ExecuteAsync();
 
@@ -120,7 +121,7 @@ async Task RunEntraIdFlow(IConfiguration cfg)
                         ["code"]          = code,
                         ["redirect_uri"]  = "http://localhost:8400/",
                         ["code_verifier"] = cv,
-                        ["scope"]         = string.Join(" ", scopes),
+                        ["scope"]         = string.Join(" ", reScopes),
                     };
                     using var http = new HttpClient();
                     HttpResponseMessage resp = await http.PostAsync(tokenEndpoint, new FormUrlEncodedContent(body));
@@ -214,7 +215,8 @@ async Task RunAdfsFlow(IConfiguration cfg)
             var reApp = ConfidentialClientApplicationBuilder
                 .Create(clientId).WithAdfsAuthority(authority)
                 .WithClientSecret(clientSecret!).WithRedirectUri("http://localhost:8400/").Build();
-            Uri authUri = await reApp.GetAuthorizationRequestUrl(scopes)
+            string[] reScopes = scopes.Concat(new[] { "openid", "profile" }).Distinct().ToArray();
+            Uri authUri = await reApp.GetAuthorizationRequestUrl(reScopes)
                 .WithRedirectUri("http://localhost:8400/")
                 .WithExtraQueryParameters(pkceParams).ExecuteAsync();
 
@@ -230,7 +232,7 @@ async Task RunAdfsFlow(IConfiguration cfg)
                         ["code"]          = code,
                         ["redirect_uri"]  = "http://localhost:8400/",
                         ["code_verifier"] = cv,
-                        ["scope"]         = string.Join(" ", scopes),
+                        ["scope"]         = string.Join(" ", reScopes),
                     };
                     using var http = new HttpClient();
                     HttpResponseMessage resp = await http.PostAsync(tokenEndpoint, new FormUrlEncodedContent(body));
@@ -301,6 +303,10 @@ async Task<TokenResult?> AcquireTokenConfidential(
         ? fixedRedirectUri!.TrimEnd('/') + "/"
         : $"http://localhost:{GetFreePort()}/";
 
+    // openid + profile are required for an id_token to be returned and for optional
+    // claims such as login_hint to be included in it
+    string[] requestScopes = scopes.Concat(new[] { "openid", "profile" }).Distinct().ToArray();
+
     IConfidentialClientApplication app = appBuilder.WithRedirectUri(redirectUri).Build();
     string state = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
     string? codeVerifier = null;
@@ -315,7 +321,7 @@ async Task<TokenResult?> AcquireTokenConfidential(
         pkceParams["code_challenge_method"] = ("S256", false);
     }
 
-    Uri authUri = await app.GetAuthorizationRequestUrl(scopes)
+    Uri authUri = await app.GetAuthorizationRequestUrl(requestScopes)
         .WithRedirectUri(redirectUri)
         .WithExtraQueryParameters(pkceParams)
         .ExecuteAsync();
@@ -356,7 +362,7 @@ async Task<TokenResult?> AcquireTokenConfidential(
             ["code"]          = code,
             ["redirect_uri"]  = redirectUri,
             ["code_verifier"] = codeVerifier,
-            ["scope"]         = string.Join(" ", scopes),
+            ["scope"]         = string.Join(" ", requestScopes),
         };
         using var http = new HttpClient();
         HttpResponseMessage resp = await http.PostAsync(tokenEndpoint, new FormUrlEncodedContent(body));
