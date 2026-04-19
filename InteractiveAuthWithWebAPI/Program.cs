@@ -940,11 +940,40 @@ static async Task RespondWithHtml(HttpListenerContext ctx, string html)
 
 void ShowTokenSummary(TokenResult result)
 {
+    string fullName = ExtractNameFromJwt(result.AccessToken);
     Console.ForegroundColor = ConsoleColor.Green;
-    Console.WriteLine($"Successfully signed in as: {result.Username}");
+    Console.Write("Successfully signed in");
+    if (!string.IsNullOrEmpty(fullName))
+        Console.Write($" — Welcome, {fullName}!");
+    Console.WriteLine();
     Console.ResetColor();
+    Console.WriteLine($"Account:        {result.Username}");
     Console.WriteLine($"Token expires:  {result.ExpiresOn.ToLocalTime():g}");
     Console.WriteLine($"Scopes granted: {string.Join(", ", result.Scopes)}");
+}
+
+static string ExtractNameFromJwt(string jwt)
+{
+    try
+    {
+        string[] parts = jwt.Split('.');
+        if (parts.Length < 2) return string.Empty;
+        string payload = parts[1].Replace('-', '+').Replace('_', '/');
+        payload += new string('=', (4 - payload.Length % 4) % 4);
+        using JsonDocument doc = JsonDocument.Parse(Convert.FromBase64String(payload));
+        JsonElement root = doc.RootElement;
+        // ADFS uses Firstname/Lastname; Entra uses given_name/family_name
+        string? first = null, last = null;
+        foreach (string c in new[] { "Firstname", "given_name" })
+            if (root.TryGetProperty(c, out JsonElement v) && v.ValueKind == JsonValueKind.String)
+            { first = v.GetString(); break; }
+        foreach (string c in new[] { "Lastname", "family_name" })
+            if (root.TryGetProperty(c, out JsonElement v) && v.ValueKind == JsonValueKind.String)
+            { last = v.GetString(); break; }
+        return string.Join(" ", new[] { first, last }.Where(s => !string.IsNullOrWhiteSpace(s)));
+    }
+    catch { }
+    return string.Empty;
 }
 
 static string ExtractUpnFromJwt(string jwt)
