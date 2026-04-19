@@ -693,6 +693,13 @@ async Task ServePosApp(
         }
 
         // ── Proxy /api/* → SweetSalesAPI ─────────────────────────────────────
+        // The SPA runs at http://localhost:8400/ but the API is on http://localhost:7001/.
+        // Direct browser→API calls would require CORS pre-flight and would expose the
+        // Bearer token to JavaScript. Instead every /api/* request is forwarded here
+        // on the server side: the listener injects the current access token from its
+        // in-memory session, tunnels the request body (for POST/PUT), and pipes the
+        // API's status code + JSON body straight back to the browser. The browser never
+        // sees the token — it just sends a cookie-authenticated request to :8400.
         if (path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase))
         {
             string targetUrl = apiBaseUrl.TrimEnd('/') + path;
