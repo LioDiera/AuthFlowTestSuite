@@ -332,9 +332,10 @@ async Task ServePosApp(string accessToken, string apiBaseUrl, string? endSession
         // Sign-out: redirect browser to IdP end_session endpoint, keep app running
         if (path.Equals("/logout", StringComparison.OrdinalIgnoreCase))
         {
+            const string postLogoutUri = "http://localhost:8400/";
             string dest = !string.IsNullOrEmpty(endSessionEndpoint)
-                ? endSessionEndpoint
-                : "about:blank";
+                ? endSessionEndpoint + "?post_logout_redirect_uri=" + Uri.EscapeDataString(postLogoutUri)
+                : postLogoutUri;
             ctx.Response.StatusCode = 302;
             ctx.Response.RedirectLocation = dest;
             ctx.Response.ContentLength64 = 0;
