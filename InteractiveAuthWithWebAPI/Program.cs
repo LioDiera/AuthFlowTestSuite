@@ -77,6 +77,10 @@ async Task RunEntraIdFlow(IConfiguration cfg)
     Console.ResetColor();
 
     string tokenEndpoint = $"https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token";
+
+    // A one-time random token embedded in the initial redirect URL (?init=<token>).
+    // The listener exchanges it for a real session cookie on first hit, then discards it.
+    // This means the access token is never visible in the browser address bar or history.
     string bootstrapToken = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
     string spaTarget = "http://localhost:8400/?init=" + bootstrapToken;
 
@@ -90,6 +94,12 @@ async Task RunEntraIdFlow(IConfiguration cfg)
             .WithClientSecret(clientSecret!);
         result = await AcquireTokenConfidential(builder, scopes, tokenEndpoint, clientId, clientSecret!, redirectUri, usePkce, spaTarget);
 
+        // buildNewSignIn is a factory delegate passed to ServePosApp so the listener
+        // can kick off a fresh OIDC sign-in entirely within the existing HTTP listener
+        // loop (no second HttpListener or port needed). It builds a new auth URL with a
+        // fresh PKCE verifier + state, stores the pending code-exchange keyed by state,
+        // and returns the redirect target. Only available for confidential clients because
+        // public clients redirect to a different port that ServePosApp doesn't control.
         buildNewSignIn = async () =>
         {
             string state = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
@@ -175,6 +185,8 @@ async Task RunAdfsFlow(IConfiguration cfg)
     string apiBaseUrl    = cfg["Adfs:ApiBaseUrl"]!;
     string[] scopes      = cfg.GetSection("Adfs:Scopes").GetChildren()
         .Select(c => c.Value!).Where(v => !string.IsNullOrEmpty(v))
+        // allatclaims is an ADFS-specific scope that instructs ADFS to include all
+        // configured claim rules in the token rather than only the default set
         .Append("allatclaims").Distinct().ToArray();
 
     Console.ForegroundColor = ConsoleColor.Cyan;
@@ -182,6 +194,9 @@ async Task RunAdfsFlow(IConfiguration cfg)
     Console.ResetColor();
 
     string tokenEndpoint = authority.TrimEnd('/') + "/oauth2/token";
+
+    // One-time token embedded in the post-sign-in redirect; consumed by the listener
+    // to create a real session cookie without ever exposing the access token in the URL.
     string bootstrapToken = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
     string spaTarget = "http://localhost:8400/?init=" + bootstrapToken;
 
@@ -201,6 +216,7 @@ async Task RunAdfsFlow(IConfiguration cfg)
             .Create(clientId).WithAdfsAuthority(authority).WithClientSecret(clientSecret!);
         result = await AcquireTokenConfidential(builder, scopes, tokenEndpoint, clientId, clientSecret!, redirectUri!, usePkce, spaTarget);
 
+        // See Entra ID flow above for an explanation of the buildNewSignIn delegate pattern
         buildNewSignIn = async () =>
         {
             string state = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
@@ -352,6 +368,10 @@ async Task<TokenResult?> AcquireTokenConfidential(
     if (!qs.TryGetValue("code", out string? code))
     { Console.ForegroundColor = ConsoleColor.Red; Console.WriteLine("No authorization code received."); Console.ResetColor(); return null; }
 
+    // AcquireTokenConfidential uses a raw HTTP POST for the token exchange when PKCE
+    // is enabled because MSAL's AcquireTokenByAuthorizationCode does not support sending
+    // a code_verifier for confidential clients (it treats PKCE as a public-client feature).
+    // Without PKCE the MSAL path works fine and is used as the fallback.
     if (usePkce && codeVerifier is not null)
     {
         var body = new Dictionary<string, string>
@@ -458,6 +478,13 @@ async Task ServePosApp(
     using HttpClient apiClient = new();
 
     // ── Session state ─────────────────────────────────────────────────────────
+    // The SPA is gated behind an HttpOnly session cookie so the access token is
+    // never exposed to JavaScript or stored in the browser. The flow is:
+    //   1. Sign-in completes → one-time ?init=<bootstrapToken> URL
+    //   2. Listener consumes bootstrap token, creates a random sessionId, sets cookie
+    //   3. Every subsequent request is validated against the sessions dict
+    //   4. Logout removes the session and clears the cookie before redirecting to IdP
+    //
     // Bootstrap map: one-time init token → tokens (consumed on first use)
     var bootstrapTokens = new Dictionary<string, (string AccessToken, string? IdToken)>
         { [bootstrapToken] = (accessToken, idToken) };
