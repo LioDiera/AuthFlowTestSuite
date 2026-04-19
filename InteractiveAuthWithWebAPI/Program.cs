@@ -95,7 +95,8 @@ async Task RunEntraIdFlow(IConfiguration cfg)
 
     if (result is null) return;
     ShowTokenSummary(result);
-    await ServePosApp(result.AccessToken, apiBaseUrl);
+    string? endSession = await GetEndSessionEndpoint($"https://login.microsoftonline.com/{tenantId}/v2.0");
+    await ServePosApp(result.AccessToken, apiBaseUrl, endSession);
 }
 
 // ── ADFS flow ─────────────────────────────────────────────────────────────────
@@ -140,7 +141,8 @@ async Task RunAdfsFlow(IConfiguration cfg)
 
     if (result is null) return;
     ShowTokenSummary(result);
-    await ServePosApp(result.AccessToken, apiBaseUrl);
+    string? endSession = await GetEndSessionEndpoint(authority);
+    await ServePosApp(result.AccessToken, apiBaseUrl, endSession);
 }
 
 // ── Public client (MSAL handles PKCE) ────────────────────────────────────────
@@ -255,7 +257,7 @@ async Task<TokenResult?> AcquireTokenConfidential(
 }
 
 // ── Serve the POS app and proxy /api/* calls to SweetSalesAPI ─────────────────
-async Task ServePosApp(string accessToken, string apiBaseUrl)
+async Task ServePosApp(string accessToken, string apiBaseUrl, string? endSessionEndpoint = null)
 {
     const string listenOn = "http://localhost:8400/";
     using var listener = new HttpListener();
@@ -327,19 +329,17 @@ async Task ServePosApp(string accessToken, string apiBaseUrl)
 
         string path = ctx.Request.Url?.AbsolutePath ?? "/";
 
-        // Sign-out: respond with a goodbye page then stop the loop
+        // Sign-out: redirect browser to IdP end_session endpoint, keep app running
         if (path.Equals("/logout", StringComparison.OrdinalIgnoreCase))
         {
-            await RespondWithHtml(ctx, """
-                <!DOCTYPE html><html><head><meta charset="utf-8"/>
-                <style>body{font-family:"Segoe UI",sans-serif;display:flex;align-items:center;
-                justify-content:center;height:100vh;margin:0;background:#fdf6ee;color:#2c1a0e;}
-                .box{text-align:center;} h2{margin-bottom:8px;} p{color:#a0714f;font-size:.9rem;}</style>
-                </head><body><div class="box"><h2>You have been signed out.</h2>
-                <p>You may close this tab.</p></div></body></html>
-                """);
-            listener.Stop();
-            break;
+            string dest = !string.IsNullOrEmpty(endSessionEndpoint)
+                ? endSessionEndpoint
+                : "about:blank";
+            ctx.Response.StatusCode = 302;
+            ctx.Response.RedirectLocation = dest;
+            ctx.Response.ContentLength64 = 0;
+            ctx.Response.Close();
+            continue; // keep listener running
         }
 
         // Proxy /api/* → SweetSalesAPI
@@ -679,9 +679,7 @@ static string BuildPosHtml(string accessToken)
           document.getElementById('user-pill')?.classList.remove('open');
         });
         function signOut() {
-          fetch('/logout').finally(() => {
-            document.body.innerHTML = '<div style="font-family:\'Segoe UI\',sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;color:#2c1a0e;"><div style="text-align:center"><h2>Signed out.</h2><p style="color:#a0714f;margin-top:8px;font-size:.9rem">You may close this tab.</p></div></div>';
-          });
+          window.location.href = '/logout';
         }
 
         // ── API helpers ────────────────────────────────────────────────────────
@@ -1047,6 +1045,21 @@ static string ExtractUpnFromJwt(string jwt)
     }
     catch { }
     return "unknown";
+}
+
+static async Task<string?> GetEndSessionEndpoint(string authority)
+{
+    try
+    {
+        string metaUrl = authority.TrimEnd('/') + "/.well-known/openid-configuration";
+        using var http = new HttpClient();
+        string json = await http.GetStringAsync(metaUrl);
+        using JsonDocument doc = JsonDocument.Parse(json);
+        if (doc.RootElement.TryGetProperty("end_session_endpoint", out JsonElement ep))
+            return ep.GetString();
+    }
+    catch { }
+    return null;
 }
 
 static string GeneratePkceVerifier()
