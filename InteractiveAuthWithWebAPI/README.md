@@ -51,6 +51,14 @@ In the [Azure portal](https://portal.azure.com):
 5. Note the **Application (client) ID** — this is `YOUR_CLIENT_ID`
 6. Note the **Directory (tenant) ID** from the Overview page — this is `YOUR_TENANT_ID`
 
+> **Optional claims / custom claims mapping — AADSTS50146**  
+> If you configure optional or mapped claims on the client app registration (e.g. via the **Token configuration** tab), Entra ID will reject the token exchange with `AADSTS50146` unless the app is configured to accept claims signed with the shared key. Fix this in the app manifest:  
+> 1. Go to the **client** app registration → **Manifest**  
+> 2. Set `"acceptMappedClaims": true`  
+> 3. Click **Save**  
+>
+> If you need tenant-wide claims mapping via a PowerShell `ClaimsMappingPolicy` instead, you must upload a dedicated signing certificate — `acceptMappedClaims` only covers app-registration-level optional claims.
+
 ---
 
 ### ADFS
