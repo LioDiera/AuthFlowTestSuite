@@ -270,8 +270,10 @@ async Task ServePosApp(string accessToken, string apiBaseUrl)
 
     if (!portInUse)
     {
+        // Resolve SweetSalesAPI directory relative to this project's source root
+        // AppContext.BaseDirectory = bin/Debug/net10.0/ → go up 3 levels to project root, then into SweetSalesAPI
         string apiDir = Path.GetFullPath(
-            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "SweetSalesAPI"));
+            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "SweetSalesAPI"));
         apiProcess = new Process
         {
             StartInfo = new ProcessStartInfo("dotnet", "run")
