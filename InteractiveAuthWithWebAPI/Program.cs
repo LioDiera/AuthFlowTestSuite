@@ -402,7 +402,8 @@ static string BuildPosHtml(string accessToken)
         nav button:hover, nav button.active { background:rgba(255,255,255,.18); color:#fff; }
         .user-pill { font-size:.8rem; color:rgba(255,255,255,.85); background:rgba(255,255,255,.15);
                      padding:5px 12px; border-radius:20px; white-space:nowrap;
-                     cursor:pointer; position:relative; user-select:none; }
+                     cursor:pointer; position:relative; user-select:none;
+                     display:flex; align-items:center; line-height:1; }
         .user-pill:hover { background:rgba(255,255,255,.25); }
         .user-dropdown { display:none; position:absolute; top:calc(100% + 8px); right:0;
                          background:#fff; border:1px solid #e8d5c0; border-radius:10px;
@@ -560,7 +561,7 @@ static string BuildPosHtml(string accessToken)
         </nav>
         {{(string.IsNullOrEmpty(fullName) ? "" : $"""
         <div class="user-pill" id="user-pill" onclick="toggleUserMenu(event)">
-          \ud83d\udc64 {fullName}
+          <span>\ud83d\udc64 {fullName}</span>
           <div class="user-dropdown" id="user-dropdown">
             <button onclick="signOut()">Sign out</button>
           </div>
