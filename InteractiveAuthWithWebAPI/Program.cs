@@ -327,6 +327,21 @@ async Task ServePosApp(string accessToken, string apiBaseUrl)
 
         string path = ctx.Request.Url?.AbsolutePath ?? "/";
 
+        // Sign-out: respond with a goodbye page then stop the loop
+        if (path.Equals("/logout", StringComparison.OrdinalIgnoreCase))
+        {
+            await RespondWithHtml(ctx, """
+                <!DOCTYPE html><html><head><meta charset="utf-8"/>
+                <style>body{font-family:"Segoe UI",sans-serif;display:flex;align-items:center;
+                justify-content:center;height:100vh;margin:0;background:#fdf6ee;color:#2c1a0e;}
+                .box{text-align:center;} h2{margin-bottom:8px;} p{color:#a0714f;font-size:.9rem;}</style>
+                </head><body><div class="box"><h2>You have been signed out.</h2>
+                <p>You may close this tab.</p></div></body></html>
+                """);
+            listener.Stop();
+            break;
+        }
+
         // Proxy /api/* → SweetSalesAPI
         if (path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase))
         {
@@ -386,7 +401,18 @@ static string BuildPosHtml(string accessToken)
                      font:inherit; padding:6px 14px; border-radius:8px; cursor:pointer; transition:.15s; }
         nav button:hover, nav button.active { background:rgba(255,255,255,.18); color:#fff; }
         .user-pill { font-size:.8rem; color:rgba(255,255,255,.85); background:rgba(255,255,255,.15);
-                     padding:5px 12px; border-radius:20px; white-space:nowrap; }
+                     padding:5px 12px; border-radius:20px; white-space:nowrap;
+                     cursor:pointer; position:relative; user-select:none; }
+        .user-pill:hover { background:rgba(255,255,255,.25); }
+        .user-dropdown { display:none; position:absolute; top:calc(100% + 8px); right:0;
+                         background:#fff; border:1px solid #e8d5c0; border-radius:10px;
+                         box-shadow:0 6px 20px rgba(0,0,0,.15); min-width:140px; z-index:100;
+                         overflow:hidden; }
+        .user-pill.open .user-dropdown { display:block; }
+        .user-dropdown button { display:block; width:100%; text-align:left; padding:10px 16px;
+                                background:none; border:none; font:inherit; font-size:.85rem;
+                                color:#2c1a0e; cursor:pointer; }
+        .user-dropdown button:hover { background:#fdf6ee; color:#7b3f00; }
 
         /* ── Layout ── */
         main { flex:1; display:grid; grid-template-columns:220px 1fr 300px; min-height:0; overflow:hidden; }
@@ -532,7 +558,14 @@ static string BuildPosHtml(string accessToken)
           <button data-tab="inventory" onclick="showTab('inventory',this)">Inventory</button>
           <button data-tab="settings"  onclick="showTab('settings',this)">Settings</button>
         </nav>
-        {{(string.IsNullOrEmpty(fullName) ? "" : $"<div class=\"user-pill\">👤 {fullName}</div>")}}
+        {{(string.IsNullOrEmpty(fullName) ? "" : $"""
+        <div class="user-pill" id="user-pill" onclick="toggleUserMenu(event)">
+          \ud83d\udc64 {fullName}
+          <div class="user-dropdown" id="user-dropdown">
+            <button onclick="signOut()">Sign out</button>
+          </div>
+        </div>
+        """)}}
       </header>
 
       <main>
@@ -636,6 +669,19 @@ static string BuildPosHtml(string accessToken)
 
       <script>
         const TOKEN = '{{accessToken}}';
+
+        function toggleUserMenu(e) {
+          e.stopPropagation();
+          document.getElementById('user-pill')?.classList.toggle('open');
+        }
+        document.addEventListener('click', () => {
+          document.getElementById('user-pill')?.classList.remove('open');
+        });
+        function signOut() {
+          fetch('/logout').finally(() => {
+            document.body.innerHTML = '<div style="font-family:\'Segoe UI\',sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;color:#2c1a0e;"><div style="text-align:center"><h2>Signed out.</h2><p style="color:#a0714f;margin-top:8px;font-size:.9rem">You may close this tab.</p></div></div>';
+          });
+        }
 
         // ── API helpers ────────────────────────────────────────────────────────
         async function apiFetch(url, opts = {}) {
