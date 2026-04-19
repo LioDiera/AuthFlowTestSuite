@@ -59,6 +59,14 @@ In the [Azure portal](https://portal.azure.com):
 >
 > If you need tenant-wide claims mapping via a PowerShell `ClaimsMappingPolicy` instead, you must upload a dedicated signing certificate — `acceptMappedClaims` only covers app-registration-level optional claims.
 
+> **Bypass the logout account-picker prompt (Entra ID)**  
+> By default, Entra ID shows an account-picker when the user signs out. To skip it, add the `login_hint` optional claim to the ID token and the app will automatically pass it as `logout_hint` in the logout request:  
+> 1. Go to the **client** app registration → **Token configuration**  
+> 2. Click **Add optional claim** → token type **ID** → tick `login_hint` → **Add**  
+> 3. When prompted, click **Turn on** to also enable the `profile` scope  
+>
+> Reference: [Sign out without user selection prompt](https://learn.microsoft.com/en-us/troubleshoot/entra/entra-id/app-integration/sign-out-of-openid-connect-oauth2-applications-without-user-selection-prompt)
+
 ---
 
 ### ADFS

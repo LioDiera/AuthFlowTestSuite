@@ -608,6 +608,11 @@ async Task ServePosApp(
                 string logoutQs = "?post_logout_redirect_uri=" + Uri.EscapeDataString(postLogoutUri);
                 if (!string.IsNullOrEmpty(currentIdToken))
                     logoutQs += "&id_token_hint=" + Uri.EscapeDataString(currentIdToken);
+                // logout_hint skips the account-picker prompt on Entra ID logout
+                // Requires login_hint added as an optional ID token claim in the app registration
+                string? loginHint = ExtractJwtClaim(currentIdToken ?? currentAccessToken, "login_hint");
+                if (!string.IsNullOrEmpty(loginHint))
+                    logoutQs += "&logout_hint=" + Uri.EscapeDataString(loginHint);
                 dest = endSessionEndpoint + logoutQs;
             }
             else
@@ -1339,6 +1344,22 @@ static string ExtractNameFromJwt(string jwt)
     }
     catch { }
     return string.Empty;
+}
+
+static string? ExtractJwtClaim(string jwt, string claimName)
+{
+    try
+    {
+        string[] parts = jwt.Split('.');
+        if (parts.Length < 2) return null;
+        string payload = parts[1].Replace('-', '+').Replace('_', '/');
+        payload += new string('=', (4 - payload.Length % 4) % 4);
+        using JsonDocument doc = JsonDocument.Parse(Convert.FromBase64String(payload));
+        if (doc.RootElement.TryGetProperty(claimName, out JsonElement v) && v.ValueKind == JsonValueKind.String)
+            return v.GetString();
+    }
+    catch { }
+    return null;
 }
 
 static string ExtractUpnFromJwt(string jwt)
