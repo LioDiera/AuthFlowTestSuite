@@ -1332,6 +1332,9 @@ static string BuildPosHtml(string accessToken)
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+// Writes an HTML response body and closes the response stream. Used for every
+// page the listener renders directly (SPA, signed-out page, error pages).
 static async Task RespondWithHtml(HttpListenerContext ctx, string html)
 {
     byte[] bytes = System.Text.Encoding.UTF8.GetBytes(html);
@@ -1341,6 +1344,7 @@ static async Task RespondWithHtml(HttpListenerContext ctx, string html)
     ctx.Response.Close();
 }
 
+// Prints a compact sign-in summary to the console after a successful token acquisition.
 void ShowTokenSummary(TokenResult result)
 {
     string fullName = ExtractNameFromJwt(result.AccessToken);
@@ -1355,6 +1359,8 @@ void ShowTokenSummary(TokenResult result)
     Console.WriteLine($"Scopes granted: {string.Join(", ", result.Scopes)}");
 }
 
+// Decodes the JWT payload (base64url, no signature verification needed here — we
+// only want display values) and returns "First Last" for the user pill in the SPA.
 static string ExtractNameFromJwt(string jwt)
 {
     try
@@ -1379,6 +1385,8 @@ static string ExtractNameFromJwt(string jwt)
     return string.Empty;
 }
 
+// Generic single-claim extractor used for logout_hint (reads login_hint from the
+// ID token). No signature verification — the token came directly from the IdP.
 static string? ExtractJwtClaim(string jwt, string claimName)
 {
     try
@@ -1395,6 +1403,8 @@ static string? ExtractJwtClaim(string jwt, string claimName)
     return null;
 }
 
+// Returns the best available username from a JWT. Falls back through several
+// claim names because Entra uses preferred_username, ADFS uses upn/unique_name.
 static string ExtractUpnFromJwt(string jwt)
 {
     try
@@ -1414,6 +1424,8 @@ static string ExtractUpnFromJwt(string jwt)
     return "unknown";
 }
 
+// Fetches the OIDC discovery document and extracts end_session_endpoint so the
+// logout redirect lands on the IdP's sign-out page rather than a local page only.
 static async Task<string?> GetEndSessionEndpoint(string authority)
 {
     try
@@ -1429,6 +1441,8 @@ static async Task<string?> GetEndSessionEndpoint(string authority)
     return null;
 }
 
+// RFC 7636 §4.1 — 32 cryptographically random bytes, base64url-encoded (no padding).
+// The verifier is sent only in the back-channel token exchange, never to the browser.
 static string GeneratePkceVerifier()
 {
     Span<byte> buf = stackalloc byte[32];
@@ -1436,6 +1450,8 @@ static string GeneratePkceVerifier()
     return Base64UrlEncode(buf.ToArray());
 }
 
+// RFC 7636 §4.2 — challenge = BASE64URL(SHA-256(ASCII(verifier))).
+// Sent in the authorization request; the IdP stores it and checks it at token exchange.
 static string GeneratePkceChallenge(string verifier)
 {
     byte[] hash = System.Security.Cryptography.SHA256.HashData(
@@ -1443,9 +1459,12 @@ static string GeneratePkceChallenge(string verifier)
     return Base64UrlEncode(hash);
 }
 
+// Standard base64url alphabet: '+' → '-', '/' → '_', trailing '=' padding stripped.
 static string Base64UrlEncode(byte[] bytes)
     => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
+// Binds a TcpListener to port 0 (OS-assigned), reads back the chosen port, then
+// releases it immediately. Used to pick a redirect URI for public-client sign-ins.
 static int GetFreePort()
 {
     using var tmp = new TcpListener(System.Net.IPAddress.Loopback, 0);
@@ -1455,11 +1474,15 @@ static int GetFreePort()
     return port;
 }
 
+// Launches the system default browser via UseShellExecute so no process path needs
+// to be hard-coded. Falls back to a console prompt if the shell launch fails.
 static void OpenBrowser(string url)
 {
     try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }); }
     catch { Console.WriteLine($"Open this URL in your browser:\n{url}"); }
 }
 
+// Immutable value type returned by every token-acquisition path so callers
+// don't depend on MSAL's AuthenticationResult type directly.
 record TokenResult(string AccessToken, string? IdToken, DateTimeOffset ExpiresOn, IReadOnlyList<string> Scopes, string Username);
 
