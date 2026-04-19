@@ -360,7 +360,10 @@ async Task ServePosApp(string accessToken, string apiBaseUrl)
 }
 
 // ── POS HTML — fully interactive SPA backed by /api/inventory and /api/settings ─
-static string BuildPosHtml(string accessToken) => $$"""
+static string BuildPosHtml(string accessToken)
+{
+    string fullName = ExtractNameFromJwt(accessToken);
+    return $$"""
     <!DOCTYPE html>
     <html lang="en">
     <head>
@@ -382,6 +385,8 @@ static string BuildPosHtml(string accessToken) => $$"""
         nav button { background:transparent; border:none; color:rgba(255,255,255,.75);
                      font:inherit; padding:6px 14px; border-radius:8px; cursor:pointer; transition:.15s; }
         nav button:hover, nav button.active { background:rgba(255,255,255,.18); color:#fff; }
+        .user-pill { font-size:.8rem; color:rgba(255,255,255,.85); background:rgba(255,255,255,.15);
+                     padding:5px 12px; border-radius:20px; white-space:nowrap; }
 
         /* ── Layout ── */
         main { flex:1; display:grid; grid-template-columns:220px 1fr 300px; min-height:0; overflow:hidden; }
@@ -527,6 +532,7 @@ static string BuildPosHtml(string accessToken) => $$"""
           <button data-tab="inventory" onclick="showTab('inventory',this)">Inventory</button>
           <button data-tab="settings"  onclick="showTab('settings',this)">Settings</button>
         </nav>
+        {{(string.IsNullOrEmpty(fullName) ? "" : $"<div class=\"user-pill\">👤 {fullName}</div>")}}
       </header>
 
       <main>
@@ -927,6 +933,7 @@ static string BuildPosHtml(string accessToken) => $$"""
     </body>
     </html>
     """;
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 static async Task RespondWithHtml(HttpListenerContext ctx, string html)
