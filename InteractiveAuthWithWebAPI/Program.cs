@@ -321,11 +321,39 @@ async Task ServePosApp(string accessToken, string? idToken, string apiBaseUrl, s
     using HttpClient apiClient = new();
     apiClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
 
+    bool signedOut = false;
+    string signedOutHtml = """
+        <!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/>
+        <style>
+          *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+          body { font-family: "Segoe UI", system-ui, sans-serif; background: #fdf6ee;
+                 color: #2c1a0e; display: flex; align-items: center;
+                 justify-content: center; height: 100vh; }
+          .box { text-align: center; }
+          h2 { font-size: 1.4rem; margin-bottom: 10px; color: #7b3f00; }
+          p  { color: #a0714f; font-size: .9rem; }
+        </style>
+        </head><body>
+          <div class="box">
+            <div style="font-size:2.5rem;margin-bottom:16px">🔒</div>
+            <h2>You have been signed out.</h2>
+            <p>Close this tab or restart the app to sign in again.</p>
+          </div>
+        </body></html>
+        """;
+
     while (true)
     {
         HttpListenerContext ctx;
         try { ctx = await listener.GetContextAsync(); }
         catch { break; }
+
+        // Once signed out, every request gets the signed-out page
+        if (signedOut)
+        {
+            await RespondWithHtml(ctx, signedOutHtml);
+            continue;
+        }
 
         string path = ctx.Request.Url?.AbsolutePath ?? "/";
 
@@ -379,29 +407,12 @@ async Task ServePosApp(string accessToken, string? idToken, string apiBaseUrl, s
             continue;
         }
 
-        // Post-logout redirect from IdP — serve signed-out page
+        // Post-logout redirect from IdP — set flag and serve signed-out page
         string? rawQuery = ctx.Request.Url?.Query;
         if (rawQuery is not null && rawQuery.Contains("signed_out=1"))
         {
-            await RespondWithHtml(ctx, """
-                <!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/>
-                <style>
-                  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-                  body { font-family: "Segoe UI", system-ui, sans-serif; background: #fdf6ee;
-                         color: #2c1a0e; display: flex; align-items: center;
-                         justify-content: center; height: 100vh; }
-                  .box { text-align: center; }
-                  h2 { font-size: 1.4rem; margin-bottom: 10px; color: #7b3f00; }
-                  p  { color: #a0714f; font-size: .9rem; }
-                </style>
-                </head><body>
-                  <div class="box">
-                    <div style="font-size:2.5rem;margin-bottom:16px">🔒</div>
-                    <h2>You have been signed out.</h2>
-                    <p>Close this tab or restart the app to sign in again.</p>
-                  </div>
-                </body></html>
-                """);
+            signedOut = true;
+            await RespondWithHtml(ctx, signedOutHtml);
             continue;
         }
 
