@@ -4,7 +4,7 @@
   <Project Path="InteractiveAuthApp/InteractiveAuthApp.csproj" />
   <Project Path="InteractiveAuthWithWebAPI/InteractiveAuthWithWebAPI.csproj" />
   <Project Path="InteractiveAuthWithWebAPI/SweetSalesAPI/SweetSalesAPI.csproj" />
-  <Project Path="IWAApp/IWAApp.csproj" />
+  <Project Path="WindowsAuthApp/WindowsAuthApp.csproj" />
   <Project Path="OBOApp/OBOApp.csproj" />
   <Project Path="ROPCApp/ROPCApp.csproj" />
 </Solution>
