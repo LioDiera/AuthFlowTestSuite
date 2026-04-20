@@ -325,7 +325,25 @@ async Task ServeStockroomApp(
         Console.ForegroundColor = ConsoleColor.DarkGray;
         Console.WriteLine("Starting SweetSalesAPI...");
         Console.ResetColor();
-        await Task.Delay(3000);
+        // Poll until port 7001 is accepting connections rather than sleeping a fixed
+        // amount of time. On a fresh clone, 'dotnet run' must restore and build before
+        // Kestrel binds — this can take 10-30 seconds. A fixed 3-second delay is
+        // not enough and causes an immediate connection-refused crash on the first
+        // proxied API request. We try every 500 ms for up to 60 seconds.
+        using var pollCts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        while (!pollCts.Token.IsCancellationRequested)
+        {
+            try
+            {
+                using var probe = new System.Net.Sockets.TcpClient();
+                await probe.ConnectAsync("localhost", 7001, pollCts.Token);
+                break; // connected — API is ready
+            }
+            catch
+            {
+                await Task.Delay(500, pollCts.Token).ContinueWith(_ => { }); // swallow cancellation
+            }
+        }
     }
 
     Console.CancelKeyPress += (_, e) =>

@@ -175,6 +175,8 @@ dotnet run
 
 Leave this terminal running. The API listens on `http://localhost:7001`.
 
+> **First run on a fresh clone:** `dotnet run` must restore NuGet packages and build the project before Kestrel binds to port 7001. This can take 15–30 seconds. The console app polls port 7001 every 500 ms (for up to 60 seconds) and opens the browser only once the API is actually accepting connections — so you do not need to start the API manually first. If you see `"Starting SweetSalesAPI..."` on the console app side, just wait.
+
 ### Step 2 — Run the console app
 
 Open a second terminal in `InteractiveAuthWithWebAPI/` and run:
