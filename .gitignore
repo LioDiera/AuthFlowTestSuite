@@ -9,3 +9,4 @@ obj/
 InteractiveAuthApp/appsettings.json
 InteractiveAuthWithWebAPI/appsettings.json
 InteractiveAuthWithWebAPI/SweetSalesAPI/appsettings.json
+WindowsAuthApp/appsettings.json
