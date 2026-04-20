@@ -99,7 +99,7 @@ No client secret is required — WAM is a **public client** flow.
 8. Under **Settings**, set *Allow public client flows* to **Yes** — click **Save**
 9. Go to **API permissions → Add a permission → APIs my organization uses**
 10. Search for `SweetSalesAPI`, select it, choose the `access_as_user` delegated permission → **Add permissions**
-11. If your tenant requires it, click **Grant admin consent**
+11. Click **Grant admin consent for \<your tenant\>** → **Yes**. 
 
 ---
 
