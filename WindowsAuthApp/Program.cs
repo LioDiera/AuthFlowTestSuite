@@ -201,7 +201,51 @@ async Task<TokenResult?> AcquireTokenWam(IPublicClientApplication app, string[] 
     catch (MsalServiceException ex)
     {
         Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine($"Authentication failed: [{ex.ErrorCode}] {ex.Message}");
+        Console.WriteLine("Authentication failed.");
+        Console.ResetColor();
+        Console.WriteLine();
+        Console.WriteLine($"  Error code : {ex.ErrorCode}");
+        Console.WriteLine($"  Message    : {ex.Message}");
+
+        // WAM surfaces Entra errors via inner exception or the message itself.
+        // Extract the AADSTS code so we can give a specific fix hint.
+        string fullMessage = ex.Message
+            + (ex.InnerException?.Message ?? string.Empty)
+            + (ex.AdditionalExceptionData != null
+                ? string.Join(" ", ex.AdditionalExceptionData.Values) : string.Empty);
+
+        Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.Yellow;
+
+        if (fullMessage.Contains("AADSTS7000218") || ex.Message.Contains("invalid_client"))
+        {
+            // The token endpoint received a public-client token request but the app
+            // registration does not have "Allow public client flows" enabled.
+            Console.WriteLine("Fix: in the Entra portal, go to:");
+            Console.WriteLine("  App registrations → <your app> → Authentication → Advanced settings");
+            Console.WriteLine("  Set 'Allow public client flows' to Yes, then Save.");
+        }
+        else if (fullMessage.Contains("AADSTS700016") || fullMessage.Contains("application was not found"))
+        {
+            Console.WriteLine("Fix: the Client ID in appsettings.json does not match any app registration");
+            Console.WriteLine("  in the configured tenant. Check EntraId:ClientId and EntraId:TenantId.");
+        }
+        else if (fullMessage.Contains("AADSTS90002") || fullMessage.Contains("Tenant") && fullMessage.Contains("not found"))
+        {
+            Console.WriteLine("Fix: the Tenant ID in appsettings.json is not recognised.");
+            Console.WriteLine("  Check EntraId:TenantId — it should be the Directory (tenant) ID GUID.");
+        }
+        else if (fullMessage.Contains("AADSTS65001") || fullMessage.Contains("consent"))
+        {
+            Console.WriteLine("Fix: the API permission has not been granted.");
+            Console.WriteLine("  Go to App registrations → API permissions and grant admin consent,");
+            Console.WriteLine("  or ask a Global Admin to do so.");
+        }
+        else
+        {
+            Console.WriteLine("Check the Entra portal app registration and appsettings.json values.");
+        }
+
         Console.ResetColor();
         return null;
     }
