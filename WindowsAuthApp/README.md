@@ -94,9 +94,9 @@ No client secret is required — WAM is a **public client** flow.
 3. Supported account types: *Accounts in this organizational directory only*
 4. Redirect URI: leave blank for now — click **Register**
 5. Copy the **Application (client) ID** and **Directory (tenant) ID** — you will need these in `appsettings.json`
-6. Go to **Authentication → Add a platform → Mobile and desktop applications**
+6. Go to **Authentication → Add a Redirect URI → Select a platform → Mobile and desktop applications**
 7. In the custom redirect URI box enter: `ms-appx-web://microsoft.aad.brokerplugin/<your-client-id>` (replace with the ID from step 5)
-8. Under **Advanced settings**, set *Allow public client flows* to **Yes** — click **Save**
+8. Under **Settings**, set *Allow public client flows* to **Yes** — click **Save**
 9. Go to **API permissions → Add a permission → APIs my organization uses**
 10. Search for `SweetSalesAPI`, select it, choose the `access_as_user` delegated permission → **Add permissions**
 11. If your tenant requires it, click **Grant admin consent**
