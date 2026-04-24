@@ -16,41 +16,6 @@ IConfiguration config = new ConfigurationBuilder()
 bool entraidConfigured = IsConfigured(config["EntraId:TenantId"]) && IsConfigured(config["EntraId:ClientId"]);
 bool adfsConfigured    = IsConfigured(config["Adfs:Authority"])   && IsConfigured(config["Adfs:ClientId"]);
 
-// ── Report detection results ──────────────────────────────────────────────────
-Console.WriteLine("Provider detection:");
-Console.Write("  Entra ID : ");
-if (entraidConfigured)
-{
-    Console.ForegroundColor = ConsoleColor.Green;
-    Console.WriteLine("configured");
-}
-else
-{
-    Console.ForegroundColor = ConsoleColor.DarkYellow;
-    Console.Write("not configured");
-    if (!IsConfigured(config["EntraId:TenantId"])) Console.Write(" (TenantId missing/placeholder)");
-    else if (!IsConfigured(config["EntraId:ClientId"])) Console.Write(" (ClientId missing/placeholder)");
-    Console.WriteLine();
-}
-Console.ResetColor();
-
-Console.Write("  ADFS     : ");
-if (adfsConfigured)
-{
-    Console.ForegroundColor = ConsoleColor.Green;
-    Console.WriteLine("configured");
-}
-else
-{
-    Console.ForegroundColor = ConsoleColor.DarkYellow;
-    Console.Write("not configured");
-    if (!IsConfigured(config["Adfs:Authority"])) Console.Write(" (Authority missing/placeholder)");
-    else if (!IsConfigured(config["Adfs:ClientId"])) Console.Write(" (ClientId missing/placeholder)");
-    Console.WriteLine();
-}
-Console.ResetColor();
-Console.WriteLine();
-
 if (!entraidConfigured && !adfsConfigured)
 {
     Console.ForegroundColor = ConsoleColor.Red;
