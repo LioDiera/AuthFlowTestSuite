@@ -110,8 +110,8 @@ If you are testing against ADFS rather than Entra ID, register a **Native Client
 | Setting | Value |
 |---|---|
 | Application type | Native application |
-| Client Identifier | Generate or choose a GUID — copy it for `appsettings.json` |
-| Redirect URI | `urn:ietf:wg:oauth:2.0:oob` |
+| Client Identifier | Pre-generated GUID — copy it (or replace with your own) for `appsettings.json` |
+| Redirect URI | `urn:ietf:wg:oauth:2.0:oob` (the standard "out-of-band" URI for native clients that don't host a redirect server) |
 | Web API to access | The SweetSalesAPI relying party trust (configured in `InteractiveAuthWithWebAPI`) |
 
 ### Step-by-step: ADFS
@@ -123,8 +123,8 @@ If you are testing against ADFS rather than Entra ID, register a **Native Client
 3. Template: *Native application accessing a web API* → **Next**
 4. **Native application** screen:
    - Name: `WindowsAuthApp`
-   - Client Identifier: click **Generate** and copy the GUID, or enter your own
-   - Redirect URI: `urn:ietf:wg:oauth:2.0:oob` → **Add** → **Next**
+   - Client Identifier: a GUID is pre-generated — copy it, or replace it with your own
+   - Redirect URI: `urn:ietf:wg:oauth:2.0:oob` (standard out-of-band URI for native clients) → **Add** → **Next**
 5. **Configure Web API** screen:
    - Identifier: enter the **resource URI** of your SweetSalesAPI relying party trust (e.g. `https://sweetsalesapi.contoso.com` or the URI you set when registering the API)
    - Click **Add** → **Next**
