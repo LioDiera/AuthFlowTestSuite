@@ -125,9 +125,12 @@ async Task RunAdfsFlow(IConfiguration cfg)
     // ADFS does not support the WAM broker — WAM is specific to Entra ID and MSA.
     // For ADFS we use the classic IWA path: MSAL negotiates Kerberos/NTLM with the
     // domain controller, then exchanges that assertion with the ADFS token endpoint.
+    // WithAdfsAuthority() cannot be used here — MSAL explicitly blocks IWA when that
+    // builder is used. WithAuthority(..., validateAuthority: false) points MSAL at the
+    // ADFS endpoint without triggering that restriction.
     IPublicClientApplication app = PublicClientApplicationBuilder
         .Create(clientId)
-        .WithAdfsAuthority(authority)
+        .WithAuthority(authority, validateAuthority: false)
         .WithDefaultRedirectUri()
         .Build();
 
