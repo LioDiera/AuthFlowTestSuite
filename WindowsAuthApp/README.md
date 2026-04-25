@@ -28,22 +28,35 @@ JWT access token  ──►  SweetSalesAPI (Bearer header, server-side proxy)
 
 WAM is the modern Windows authentication broker. MSAL delegates to the Windows account subsystem, which uses the account already signed into Windows — no Kerberos ticket negotiation, no domain controller round-trip. The resulting JWT is identical in structure to a token acquired via Auth Code + PKCE; SweetSalesAPI validates it the same way.
 
-### ADFS — IWA (Integrated Windows Authentication)
+### ADFS — WS-Trust Windows Transport
 
 ```
 Windows session (Kerberos/NTLM)
        │
        ▼
-MSAL AcquireTokenByIntegratedWindowsAuth()
+POST /adfs/services/trust/13/windowstransport  (WS-Trust 1.3)
+  or /adfs/services/trust/2005/windowstransport (WS-Trust 2005 fallback)
+  → HttpClientHandler.UseDefaultCredentials = true
+    .NET attaches the current Windows Kerberos/NTLM ticket automatically
        │
        ▼
-ADFS token endpoint
+ADFS returns a SAML assertion (SAML 2.0 preferred, 1.1 fallback)
+       │
+       ▼
+POST /adfs/oauth2/token
+  grant_type=urn:ietf:params:oauth:grant-type:saml2-bearer
+  (or saml1_1-bearer for SAML 1.1 tokens)
        │
        ▼
 JWT access token  ──►  SweetSalesAPI
 ```
 
-WAM does not support ADFS — it is specific to Entra ID and MSA. For ADFS the classic IWA path is used: MSAL negotiates a Kerberos or NTLM ticket with the domain controller and exchanges it with the ADFS `/token` endpoint. `AcquireTokenByIntegratedWindowsAuth` is marked obsolete in MSAL 4.x (WAM is preferred for Entra ID), but it remains the correct call for ADFS.
+MSAL's `AcquireTokenByIntegratedWindowsAuth` is blocked by MSAL itself for any authority URL that contains `/adfs/` — MSAL classifies it as `AuthorityType.Adfs` and `IsWsTrustFlowSupported` returns false. WAM is also Entra-ID/MSA-only.
+
+Instead, the app implements the same two-step exchange MSAL uses internally for federated Entra ID users, but calls ADFS directly:
+
+1. **WS-Trust Windows Transport** — a SOAP `RequestSecurityToken` is posted to the Windows Transport endpoint. .NET's `HttpClientHandler.UseDefaultCredentials = true` attaches the current Kerberos (or NTLM) credential from the Windows session automatically. ADFS validates it and returns a SAML assertion.
+2. **OAuth SAML bearer grant (RFC 7522)** — the SAML assertion is base64url-encoded and posted to `/adfs/oauth2/token` with `grant_type=urn:ietf:params:oauth:grant-type:saml2-bearer`. ADFS exchanges it for a standard JWT access token.
 
 ---
 
@@ -65,10 +78,11 @@ Follow the setup guide in `InteractiveAuthWithWebAPI/` before continuing here.
 - The signed-in Windows account is an **organisational account** (not a personal Microsoft account)
 - If a **Conditional Access policy** requires MFA: the user must have signed into Windows with a strong credential such as **Windows Hello for Business (WHfB)** or a **FIDO2 key** — WAM presents the MFA claim from that credential to Entra ID silently. If Windows was unlocked with a password only, CA MFA will cause a `MsalUiRequiredException` because there is nowhere to show a prompt.
 
-**ADFS (IWA)** works when:
+**ADFS (WS-Trust Windows Transport)** works when:
 - The machine is **domain-joined** (on-prem AD)
 - The signed-in Windows account is an **organisational account**
-- No **Conditional Access policy** on the account requires MFA — IWA is a silent Kerberos/NTLM flow with no mechanism to satisfy an MFA challenge
+- The **ADFS Windows Transport endpoints are enabled** (`/adfs/services/trust/13/windowstransport` or `/2005/windowstransport`)
+- No **Conditional Access policy** on the account requires MFA — this is a silent flow with no mechanism to satisfy an MFA challenge
 
 If authentication fails, the app exits with a clear explanation before the browser opens. Use `InteractiveAuthWithWebAPI` if you need an interactive fallback.
 

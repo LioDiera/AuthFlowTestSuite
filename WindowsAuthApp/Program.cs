@@ -1,7 +1,9 @@
 ﻿using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
+using System.Xml.Linq;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Identity.Client;
 using Microsoft.Identity.Client.Broker; // Required for WithBroker(BrokerOptions) extension method
@@ -106,43 +108,281 @@ async Task RunEntraIdFlow(IConfiguration cfg)
         authMethodDescription: "Web Account Manager (WAM)");
 }
 
-// ── ADFS — IWA flow ───────────────────────────────────────────────────────────
+// ── ADFS — WS-Trust Windows Transport → SAML bearer OAuth flow ──────────────
+// MSAL's AcquireTokenByIntegratedWindowsAuth is blocked when the authority URL
+// contains "/adfs/" (MSAL classifies it as AuthorityType.Adfs and
+// IsWsTrustFlowSupported returns false). WAM is also Entra-ID/MSA-only.
+//
+// Instead we implement the same two-step flow that MSAL uses internally for
+// federated Entra ID users, but call ADFS directly:
+//
+//   Step 1 — WS-Trust Windows Transport
+//     POST a RequestSecurityToken SOAP envelope to
+//       /adfs/services/trust/13/windowstransport  (WS-Trust 1.3, preferred)
+//       /adfs/services/trust/2005/windowstransport (WS-Trust 2005, fallback)
+//     HttpClientHandler.UseDefaultCredentials = true causes .NET to attach the
+//     current Windows Kerberos (or NTLM) ticket automatically — no credentials
+//     in code. ADFS validates the ticket and returns a SAML assertion.
+//
+//   Step 2 — OAuth SAML bearer grant
+//     POST the SAML assertion to /adfs/oauth2/token using
+//       grant_type=urn:ietf:params:oauth:grant-type:saml1_1-bearer  (SAML 1.1)
+//       grant_type=urn:ietf:params:oauth:grant-type:saml2-bearer     (SAML 2.0)
+//     ADFS exchanges the SAML assertion for a standard OAuth JWT access token.
+//
+// The result is a JWT identical in structure to one produced by any other ADFS
+// OAuth flow; SweetSalesAPI validates it the same way.
 async Task RunAdfsFlow(IConfiguration cfg)
 {
-    string authority  = cfg["Adfs:Authority"]!;
+    string authority  = cfg["Adfs:Authority"]!.TrimEnd('/');
     string clientId   = cfg["Adfs:ClientId"]!;
     string apiBaseUrl = cfg["Adfs:ApiBaseUrl"] ?? "http://localhost:7001";
-    string[] scopes   = cfg.GetSection("Adfs:Scopes").GetChildren()
+    string resource   = cfg.GetSection("Adfs:Scopes").GetChildren()
         .Select(c => c.Value!).Where(v => !string.IsNullOrEmpty(v))
-        // allatclaims is an ADFS-specific scope that includes all configured claim
-        // rules in the token rather than only the default minimal set
-        .Append("allatclaims").Distinct().ToArray();
+        .FirstOrDefault() ?? string.Empty;
 
     Console.ForegroundColor = ConsoleColor.Cyan;
-    Console.WriteLine("══ ADFS — Integrated Windows Authentication (IWA) ════════");
+    Console.WriteLine("══ ADFS — Windows Authentication (WS-Trust → SAML bearer) ═");
     Console.ResetColor();
 
-    // ADFS does not support the WAM broker — WAM is specific to Entra ID and MSA.
-    // For ADFS we use the classic IWA path: MSAL negotiates Kerberos/NTLM with the
-    // domain controller, then exchanges that assertion with the ADFS token endpoint.
-    // WithAdfsAuthority() cannot be used here — MSAL explicitly blocks IWA when that
-    // builder is used. WithAuthority(..., validateAuthority: false) points MSAL at the
-    // ADFS endpoint without triggering that restriction.
-    IPublicClientApplication app = PublicClientApplicationBuilder
-        .Create(clientId)
-        .WithAuthority(authority, validateAuthority: false)
-        .WithDefaultRedirectUri()
-        .Build();
-
-    string[] requestScopes = scopes.Concat(new[] { "openid", "profile" }).Distinct().ToArray();
-
-    TokenResult? result = await AcquireTokenIwa(app, requestScopes);
+    TokenResult? result = await AcquireTokenAdfsWsTrust(authority, clientId, resource);
     if (result is null) return;
 
     ShowTokenSummary(result);
     string? endSession = await GetEndSessionEndpoint(authority);
-    await ServeStockroomApp(result, app, requestScopes, apiBaseUrl, endSession,
-        authMethodDescription: "Integrated Windows Authentication (IWA)");
+    // Pass null for msalApp — ADFS tokens are refreshed by re-running the WS-Trust
+    // flow rather than through MSAL's cache (MSAL has no ADFS token in its cache).
+    await ServeStockroomApp(result, msalApp: null, scopes: new[] { resource },
+        apiBaseUrl, endSession,
+        authMethodDescription: "Windows Authentication (WS-Trust / ADFS)");
+}
+
+// ── Acquire token via WS-Trust Windows Transport + SAML bearer — ADFS ────────
+async Task<TokenResult?> AcquireTokenAdfsWsTrust(string authority, string clientId, string resource)
+{
+    Console.WriteLine("Authenticating via WS-Trust Windows Transport...");
+    Console.WriteLine("(Using the current Windows Kerberos/NTLM identity — no browser will open)");
+    Console.WriteLine();
+
+    // ── Step 1: Obtain a SAML assertion from ADFS via WS-Trust ────────────────
+    // Try WS-Trust 1.3 first (preferred), fall back to WS-Trust 2005.
+    // The endpoint uses Windows Integrated Authentication (Negotiate/Kerberos/NTLM);
+    // UseDefaultCredentials instructs .NET to send the current Windows credential.
+    string? samlAssertion = null;
+    string? samlVersion   = null; // "1.1" or "2.0"
+
+    string[] wsTrustEndpoints = [
+        $"{authority}/services/trust/13/windowstransport",
+        $"{authority}/services/trust/2005/windowstransport",
+    ];
+
+    foreach (string endpoint in wsTrustEndpoints)
+    {
+        bool is2005 = endpoint.Contains("/2005/");
+        string soapEnvelope = BuildWsTrustRequest(endpoint, resource, is2005);
+
+        using var handler = new HttpClientHandler
+        {
+            UseDefaultCredentials = true,
+            // Allow NTLM fallback when Kerberos is not available (e.g. workgroup machines).
+            // CredentialCache.DefaultNetworkCredentials includes both.
+        };
+        using var http = new HttpClient(handler);
+        http.Timeout = TimeSpan.FromSeconds(30);
+
+        // SOAPAction header selects the WS-Trust operation on the ADFS endpoint.
+        string soapAction = is2005
+            ? "http://schemas.xmlsoap.org/ws/2005/02/trust/RST/Issue"
+            : "http://docs.oasis-open.org/ws-sx/ws-trust/200512/RST/Issue";
+
+        var content = new StringContent(soapEnvelope, Encoding.UTF8, "application/soap+xml");
+        content.Headers.Add("SOAPAction", $"\"{soapAction}\"");
+
+        try
+        {
+            HttpResponseMessage resp = await http.PostAsync(endpoint, content);
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                string err = await resp.Content.ReadAsStringAsync();
+                Console.ForegroundColor = ConsoleColor.DarkYellow;
+                Console.WriteLine($"WS-Trust endpoint {endpoint} returned {(int)resp.StatusCode}: skipping.");
+                Console.ResetColor();
+                continue;
+            }
+
+            string soapBody = await resp.Content.ReadAsStringAsync();
+            (samlAssertion, samlVersion) = ExtractSamlAssertion(soapBody);
+
+            if (samlAssertion is not null)
+            {
+                Console.ForegroundColor = ConsoleColor.DarkGray;
+                Console.WriteLine($"SAML {samlVersion} assertion obtained from {endpoint}");
+                Console.ResetColor();
+                break;
+            }
+        }
+        catch (HttpRequestException ex)
+        {
+            Console.ForegroundColor = ConsoleColor.DarkYellow;
+            Console.WriteLine($"WS-Trust endpoint {endpoint} unreachable: {ex.Message}");
+            Console.ResetColor();
+        }
+    }
+
+    if (samlAssertion is null)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("Failed to obtain a SAML assertion from ADFS.");
+        Console.ResetColor();
+        Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine("WS-Trust Windows Transport requires:");
+        Console.WriteLine("  • A domain-joined Windows machine (Kerberos/NTLM must be available)");
+        Console.WriteLine("  • The ADFS Windows Transport endpoints must be enabled");
+        Console.WriteLine("    (/adfs/services/trust/13/windowstransport or /2005/windowstransport)");
+        Console.WriteLine("  • The machine must be able to reach the ADFS server");
+        Console.WriteLine("  • No MFA policy on the account (WS-Trust is a silent flow)");
+        Console.ResetColor();
+        return null;
+    }
+
+    // ── Step 2: Exchange the SAML assertion for an OAuth JWT at /adfs/oauth2/token
+    // RFC 7522 defines the SAML bearer grant types:
+    //   saml1_1-bearer for SAML 1.1 tokens
+    //   saml2-bearer   for SAML 2.0 tokens
+    // ADFS supports both. The assertion must be base64url-encoded (not standard base64).
+    string grantType = samlVersion == "2.0"
+        ? "urn:ietf:params:oauth:grant-type:saml2-bearer"
+        : "urn:ietf:params:oauth:grant-type:saml1_1-bearer";
+
+    // base64url encoding: replace + with - and / with _, strip trailing =
+    string assertionB64Url = Convert.ToBase64String(Encoding.UTF8.GetBytes(samlAssertion))
+        .Replace('+', '-').Replace('/', '_').TrimEnd('=');
+
+    string tokenEndpoint = $"{authority}/oauth2/token";
+
+    var tokenParams = new Dictionary<string, string>
+    {
+        ["grant_type"]    = grantType,
+        ["client_id"]     = clientId,
+        ["assertion"]     = assertionB64Url,
+        ["resource"]      = resource,
+        ["scope"]         = "openid",
+    };
+
+    try
+    {
+        using var http = new HttpClient();
+        http.Timeout = TimeSpan.FromSeconds(30);
+        HttpResponseMessage tokenResp = await http.PostAsync(
+            tokenEndpoint, new FormUrlEncodedContent(tokenParams));
+        string tokenBody = await tokenResp.Content.ReadAsStringAsync();
+
+        if (!tokenResp.IsSuccessStatusCode)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"ADFS token endpoint returned {(int)tokenResp.StatusCode}.");
+            Console.ResetColor();
+            Console.WriteLine($"Response: {tokenBody}");
+            return null;
+        }
+
+        using JsonDocument doc = JsonDocument.Parse(tokenBody);
+        JsonElement root = doc.RootElement;
+
+        string? accessToken  = root.TryGetProperty("access_token",  out JsonElement at) ? at.GetString() : null;
+        string? idToken      = root.TryGetProperty("id_token",       out JsonElement it) ? it.GetString() : null;
+        int     expiresIn    = root.TryGetProperty("expires_in",     out JsonElement ei)
+                                && int.TryParse(ei.ValueKind == JsonValueKind.String ? ei.GetString() : ei.GetRawText(), out int n) ? n : 3600;
+
+        if (accessToken is null)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("Token response did not contain an access_token.");
+            Console.ResetColor();
+            Console.WriteLine($"Response: {tokenBody}");
+            return null;
+        }
+
+        string username = ExtractUpnFromJwt(accessToken);
+        return new TokenResult(
+            accessToken, idToken,
+            DateTimeOffset.UtcNow.AddSeconds(expiresIn),
+            new[] { resource },
+            username);
+    }
+    catch (Exception ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"Token exchange failed: {ex.Message}");
+        Console.ResetColor();
+        return null;
+    }
+}
+
+// ── Build a WS-Trust RequestSecurityToken SOAP envelope ───────────────────────
+// The envelope requests a token from ADFS for the specified resource (appliesTo).
+// The Windows Transport binding handles authentication — no UsernameToken needed.
+// WS-Trust 1.3 and 2005 use different XML namespaces and action URIs but the
+// same logical structure.
+static string BuildWsTrustRequest(string endpoint, string appliesTo, bool use2005)
+{
+    string trustNs = use2005
+        ? "http://schemas.xmlsoap.org/ws/2005/02/trust"
+        : "http://docs.oasis-open.org/ws-sx/ws-trust/200512";
+    string soapAction = use2005
+        ? $"{trustNs}/RST/Issue"
+        : $"{trustNs}/RST/Issue";
+    string tokenType = "http://docs.oasis-open.org/wss/oasis-wss-saml-token-profile-1.1#SAMLV2.0";
+
+    return $"""<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
+            xmlns:a="http://www.w3.org/2005/08/addressing"
+            xmlns:u="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">
+  <s:Header>
+    <a:Action s:mustUnderstand="1">{soapAction}</a:Action>
+    <a:ReplyTo><a:Address>http://www.w3.org/2005/08/addressing/anonymous</a:Address></a:ReplyTo>
+    <a:To s:mustUnderstand="1">{endpoint}</a:To>
+  </s:Header>
+  <s:Body>
+    <trust:RequestSecurityToken xmlns:trust="{trustNs}">
+      <wsp:AppliesTo xmlns:wsp="http://schemas.xmlsoap.org/ws/2004/09/policy">
+        <a:EndpointReference>
+          <a:Address>{System.Security.SecurityElement.Escape(appliesTo)}</a:Address>
+        </a:EndpointReference>
+      </wsp:AppliesTo>
+      <trust:KeyType>{trustNs}/Bearer</trust:KeyType>
+      <trust:RequestType>{trustNs}/Issue</trust:RequestType>
+      <trust:TokenType>{tokenType}</trust:TokenType>
+    </trust:RequestSecurityToken>
+  </s:Body>
+</s:Envelope>""";
+}
+
+// ── Extract the SAML assertion from a WS-Trust SOAP response ─────────────────
+// ADFS wraps the issued token in RequestedSecurityToken inside the SOAP body.
+// We look for either a SAML 2.0 Assertion or a SAML 1.1 Assertion element.
+static (string? Assertion, string? Version) ExtractSamlAssertion(string soapXml)
+{
+    try
+    {
+        XDocument doc = XDocument.Parse(soapXml);
+
+        // SAML 2.0
+        XNamespace saml2 = "urn:oasis:names:tc:SAML:2.0:assertion";
+        XElement? saml2el = doc.Descendants(saml2 + "Assertion").FirstOrDefault();
+        if (saml2el is not null)
+            return (saml2el.ToString(SaveOptions.DisableFormatting), "2.0");
+
+        // SAML 1.1
+        XNamespace saml1 = "urn:oasis:names:tc:SAML:1.0:assertion";
+        XElement? saml1el = doc.Descendants(saml1 + "Assertion").FirstOrDefault();
+        if (saml1el is not null)
+            return (saml1el.ToString(SaveOptions.DisableFormatting), "1.1");
+    }
+    catch { }
+    return (null, null);
 }
 
 // ── Acquire token via WAM (Web Account Manager) — Entra ID ──────────────────
@@ -261,61 +501,7 @@ async Task<TokenResult?> AcquireTokenWam(IPublicClientApplication app, string[] 
     }
 }
 
-// ── Acquire token via IWA (Integrated Windows Authentication) — ADFS ──────────
-// WAM does not support ADFS federation — it is specific to Entra ID and MSA.
-// For ADFS we use the classic IWA path: MSAL negotiates a Kerberos or NTLM
-// ticket with the domain controller and exchanges it with the ADFS /token
-// endpoint using grant_type=urn:ietf:params:oauth:grant-type:windows.
-// AcquireTokenByIntegratedWindowsAuth is obsolete in MSAL 4.x (WAM is preferred
-// for Entra ID), but it remains the correct choice for ADFS.
-async Task<TokenResult?> AcquireTokenIwa(IPublicClientApplication app, string[] scopes)
-{
-    Console.WriteLine("Authenticating via Integrated Windows Authentication (IWA)...");
-    Console.WriteLine("(Using the current Windows identity — no browser will open)");
-    Console.WriteLine();
-    try
-    {
-        // WithUsername is optional — MSAL discovers the UPN from the current Windows
-        // session via the Kerberos/NTLM ticket when omitted.
-#pragma warning disable CS0618 // obsolete for Entra ID; correct for ADFS — see comment above
-        AuthenticationResult r = await app.AcquireTokenByIntegratedWindowsAuth(scopes)
-            .ExecuteAsync();
-#pragma warning restore CS0618
-        return new TokenResult(r.AccessToken, r.IdToken, r.ExpiresOn, r.Scopes.ToArray(), r.Account.Username);
-    }
-    catch (MsalUiRequiredException ex)
-    {
-        Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine("Silent authentication failed — user interaction is required.");
-        Console.ResetColor();
-        Console.WriteLine();
-        Console.WriteLine($"  Error code : {ex.ErrorCode}");
-        Console.WriteLine($"  Reason     : {ex.Message}");
-        Console.WriteLine();
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine("IWA requires:");
-        Console.WriteLine("  • A domain-joined Windows machine");
-        Console.WriteLine("  • No MFA or Conditional Access policy on the account");
-        Console.WriteLine("  • 'Allow public client flows' enabled on the app registration");
-        Console.WriteLine("  • An organisational account (not a personal Microsoft account)");
-        Console.ResetColor();
-        return null;
-    }
-    catch (MsalServiceException ex)
-    {
-        Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine($"Authentication failed: [{ex.ErrorCode}] {ex.Message}");
-        Console.ResetColor();
-        return null;
-    }
-    catch (MsalClientException ex)
-    {
-        Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine($"MSAL client error: [{ex.ErrorCode}] {ex.Message}");
-        Console.ResetColor();
-        return null;
-    }
-}
+
 
 // ── Serve the Stockroom Manager SPA ──────────────────────────────────────────
 // Opens a local HttpListener on :8401, launches SweetSalesAPI if not already
@@ -332,7 +518,7 @@ async Task<TokenResult?> AcquireTokenIwa(IPublicClientApplication app, string[] 
 // token is kept (it may still be valid for a few more minutes).
 async Task ServeStockroomApp(
     TokenResult initialResult,
-    IPublicClientApplication msalApp,
+    IPublicClientApplication? msalApp,  // null for ADFS (no MSAL cache available)
     string[] scopes,
     string apiBaseUrl,
     string? endSessionEndpoint,
@@ -524,13 +710,12 @@ async Task ServeStockroomApp(
         }
 
         // ── Silent token refresh ──────────────────────────────────────────────
-        // MSAL caches tokens and can silently renew them using the refresh token
-        // stored in its in-memory cache. We attempt this before every proxied API
-        // call so the Bearer token forwarded to SweetSalesAPI is always fresh.
-        // AcquireTokenSilent checks the cache first; if the access token has not
-        // yet expired it is returned immediately without a network call.
-        // WithForceRefresh(false) is the default — only refresh when truly needed.
-        currentAccessToken = await TryRefreshToken(msalApp, scopes, currentAccessToken);
+        // For Entra ID (WAM): MSAL caches tokens and can silently renew them using
+        // the refresh token stored in its in-memory cache.
+        // For ADFS (WS-Trust): msalApp is null — there is no MSAL cache. Refresh
+        // is skipped and the original token is used until it expires.
+        if (msalApp is not null)
+            currentAccessToken = await TryRefreshToken(msalApp, scopes, currentAccessToken);
 
         // ── Proxy /api/* → SweetSalesAPI ─────────────────────────────────────
         // Same server-side proxy pattern as InteractiveAuthWithWebAPI. The Bearer
@@ -572,12 +757,12 @@ async Task ServeStockroomApp(
 // is still valid MSAL returns it without a network call. If a refresh token is
 // available MSAL will use it automatically. Returns the original token on any
 // failure so the caller can continue with the potentially still-valid token.
-async Task<string> TryRefreshToken(IPublicClientApplication app, string[] scopes, string current)
+async Task<string> TryRefreshToken(IPublicClientApplication? app, string[] scopes, string current)
 {
     try
     {
+        if (app is null) return current;
         // GetAccountsAsync returns accounts MSAL has tokens for in its cache.
-        // For IWA there will be exactly one account after the initial sign-in.
         var accounts = await app.GetAccountsAsync();
         IAccount? account = accounts.FirstOrDefault();
         if (account is null) return current;
@@ -1038,7 +1223,7 @@ void ShowTokenSummary(TokenResult result)
 {
     string fullName = ExtractNameFromJwt(result.AccessToken);
     Console.ForegroundColor = ConsoleColor.Green;
-    Console.Write("Successfully authenticated via IWA");
+    Console.Write("Successfully authenticated");
     if (!string.IsNullOrEmpty(fullName))
         Console.Write($" — Welcome, {fullName}!");
     Console.WriteLine();
