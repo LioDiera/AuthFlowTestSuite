@@ -336,7 +336,8 @@ static string BuildWsTrustRequest(string endpoint, string appliesTo, bool use200
         : $"{trustNs}/RST/Issue";
     string tokenType = "http://docs.oasis-open.org/wss/oasis-wss-saml-token-profile-1.1#SAMLV2.0";
 
-    return $"""<?xml version="1.0" encoding="UTF-8"?>
+    return $"""
+<?xml version="1.0" encoding="UTF-8"?>
 <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
             xmlns:a="http://www.w3.org/2005/08/addressing"
             xmlns:u="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">
@@ -357,7 +358,8 @@ static string BuildWsTrustRequest(string endpoint, string appliesTo, bool use200
       <trust:TokenType>{tokenType}</trust:TokenType>
     </trust:RequestSecurityToken>
   </s:Body>
-</s:Envelope>""";
+</s:Envelope>
+""";
 }
 
 // ── Extract the SAML assertion from a WS-Trust SOAP response ─────────────────
