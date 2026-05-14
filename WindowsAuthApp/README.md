@@ -82,6 +82,7 @@ Follow the setup guide in `InteractiveAuthWithWebAPI/` before continuing here.
 - The machine is **domain-joined** (on-prem AD)
 - The signed-in Windows account is an **organisational account**
 - The **ADFS Windows Transport endpoints are enabled** (`/adfs/services/trust/13/windowstransport` or `/2005/windowstransport`)
+- The **ADFS Application Permission** for this client has `saml2_bearer` in its `AllowedGrantTypes` (see ADFS registration step 8a below — the AD FS Management wizard does not add this automatically)
 - No **Conditional Access policy** on the account requires MFA — this is a silent flow with no mechanism to satisfy an MFA challenge
 
 If authentication fails, the app exits with a clear explanation before the browser opens. Use `InteractiveAuthWithWebAPI` if you need an interactive fallback.
@@ -145,6 +146,23 @@ If you are testing against ADFS rather than Entra ID, register a **Native Client
 6. **Apply Access Control Policy**: choose *Permit everyone* (or your organisation's policy) → **Next**
 7. **Configure Application Permissions**: ensure `openid` and your API scope (e.g. `access_as_user` or the scope defined on the Web API) are ticked → **Next** → **Close**
 8. Copy the **Client Identifier** GUID into `appsettings.json` under `Adfs:ClientId`
+
+   > **Step 8a — enable the SAML bearer grant type (required for WS-Trust flow)**
+   >
+   > The AD FS Management wizard creates the Application Permission with only `authorization_code` and `refresh_token`. The WS-Trust → SAML bearer exchange additionally needs `saml2_bearer`. Run this PowerShell **on the ADFS server** after completing the wizard:
+   >
+   > ```powershell
+   > # Check what AllowedGrantTypes are currently set
+   > Get-AdfsApplicationPermission | Where-Object { $_.ClientRoleIdentifier -eq 'YOUR_CLIENT_GUID' }
+   >
+   > # Add saml2_bearer (preserving existing grants)
+   > Set-AdfsApplicationPermission `
+   >     -TargetClientRoleIdentifier 'YOUR_CLIENT_GUID' `
+   >     -TargetServerRoleIdentifier 'YOUR_API_RESOURCE_URI' `
+   >     -AllowedGrantTypes authorization_code,refresh_token,saml2_bearer
+   > ```
+   >
+   > If you skip this step, the app prints an `MSIS9611` error with the exact PowerShell command to run.
 
 ---
 

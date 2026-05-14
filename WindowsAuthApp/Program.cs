@@ -285,6 +285,33 @@ async Task<TokenResult?> AcquireTokenAdfsWsTrust(string authority, string client
             Console.WriteLine($"ADFS token endpoint returned {(int)tokenResp.StatusCode}.");
             Console.ResetColor();
             Console.WriteLine($"Response: {tokenBody}");
+            Console.WriteLine();
+
+            // MSIS9611 / unsupported_grant_type means the ADFS Application Permission
+            // does not have the saml2_bearer grant type enabled. This is a missing
+            // configuration step — the ADFS Management wizard does not expose it.
+            if (tokenBody.Contains("MSIS9611", StringComparison.OrdinalIgnoreCase) ||
+                tokenBody.Contains("unsupported_grant_type", StringComparison.OrdinalIgnoreCase))
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine("ADFS rejected the SAML bearer grant type (MSIS9611).");
+                Console.WriteLine("The Application Permission for this client does not allow 'saml2_bearer'.");
+                Console.WriteLine();
+                Console.WriteLine("Run this on the ADFS server to enable it:");
+                Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.White;
+                Console.WriteLine($"  Set-AdfsApplicationPermission `");
+                Console.WriteLine($"    -TargetClientRoleIdentifier  \"{clientId}\" `");
+                Console.WriteLine($"    -TargetServerRoleIdentifier  \"{resource}\" `");
+                Console.WriteLine( "    -AllowedGrantTypes authorization_code,refresh_token,saml2_bearer");
+                Console.ResetColor();
+                Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.DarkGray;
+                Console.WriteLine("(Replace authorization_code,refresh_token with whatever the permission");
+                Console.WriteLine(" currently shows — use Get-AdfsApplicationPermission to check.)");
+                Console.ResetColor();
+            }
+
             return null;
         }
 
