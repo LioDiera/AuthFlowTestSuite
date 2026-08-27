@@ -6,8 +6,4 @@ obj/
 .vs/
 *.user
 
-# App settings — keep local only
-InteractiveAuthApp/appsettings.json
-InteractiveAuthWithWebAPI/appsettings.json
-InteractiveAuthWithWebAPI/SweetSalesAPI/appsettings.json
-WindowsAuthApp/appsettings.json
+

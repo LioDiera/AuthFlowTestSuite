@@ -12,6 +12,7 @@ using Microsoft.Identity.Client.Broker; // Required for WithBroker(BrokerOptions
 IConfiguration config = new ConfigurationBuilder()
     .SetBasePath(AppContext.BaseDirectory)
     .AddJsonFile("appsettings.json", optional: false)
+    .AddJsonFile("appsettings.Development.json", optional: true)
     .Build();
 
 // ── Detect configured providers ──────────────────────────────────────────────
