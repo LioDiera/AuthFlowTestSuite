@@ -4,15 +4,15 @@ A collection of .NET 10 console apps for testing OAuth 2.0 / OpenID Connect auth
 
 ## Apps
 
-| App | Flow | Entra ID | ADFS |
-|---|---|---|---|
-| [DeviceCodeFlowApp](DeviceCodeFlowApp/README.md) | Device Code | ✅ | ✅ |
-| [InteractiveAuthApp](InteractiveAuthApp/) | Authorization Code + PKCE (browser pop-up) | ✅ | ✅ |
-| [IWAApp](IWAApp/) | Integrated Windows Authentication | ✅ | ✅ |
-| [ROPCApp](ROPCApp/) | Resource Owner Password Credentials | ✅ | ✅ |
-| [ClientCredentialsApp](ClientCredentialsApp/) | Client Credentials (daemon / service) | ✅ | ❌ |
-| [OBOApp](OBOApp/) | On-Behalf-Of | ✅ | ❌ |
-| [InteractiveAuthWithWebAPI](InteractiveAuthWithWebAPI/) | Authorization Code + PKCE → protected Web API call | ✅ | ✅ |
+| App | Flow | Entra ID | ADFS | Status |
+|---|---|---|---|---|
+| [DeviceCodeFlowApp](DeviceCodeFlowApp/README.md) | Device Code | ✅ | ✅ | Ready |
+| [InteractiveAuthApp](InteractiveAuthApp/README.md) | Authorization Code + PKCE (browser pop-up) | ✅ | ✅ | Ready |
+| [WindowsAuthApp](WindowsAuthApp/README.md) | Integrated Windows Authentication | ✅ | ✅ | Ready |
+| [InteractiveAuthWithWebAPI](InteractiveAuthWithWebAPI/README.md) | Authorization Code + PKCE → protected Web API call | ✅ | ✅ | Ready |
+| [ClientCredentialsApp](ClientCredentialsApp/) | Client Credentials (daemon / service) | ✅ | ❌ | Stub |
+| [OBOApp](OBOApp/) | On-Behalf-Of | ✅ | ❌ | Stub |
+| [ROPCApp](ROPCApp/) | Resource Owner Password Credentials | ✅ | ✅ | Stub |
 
 ## Prerequisites
 
@@ -23,6 +23,12 @@ A collection of .NET 10 console apps for testing OAuth 2.0 / OpenID Connect auth
   ```
   dotnet nuget add source https://api.nuget.org/v3/index.json --name nuget.org
   ```
+
+## Configure
+
+- Each app has an `appsettings.json` with `<placeholder>` values.
+- Put your real values in `appsettings.Development.json` in the same folder. It overrides the template and must not be committed.
+- An app skips a provider (Entra ID or ADFS) that still has placeholder values.
 
 ## Running an App
 
